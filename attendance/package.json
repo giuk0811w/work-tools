@@ -1,0 +1,83 @@
+{
+  "name": "attendance-book",
+  "productName": "출석부",
+  "version": "0.1.0",
+  "description": "강원온라인학교 출석 관리 앱",
+  "main": "src/main/main.js",
+  "private": true,
+  "author": "giuk0811w",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "dist:win": "electron-builder --win",
+    "dist:dir": "electron-builder --dir",
+    "test:e2e": "node test/e2e/run.js"
+  },
+  "devDependencies": {
+    "electron": "^39.0.0",
+    "electron-builder": "^26.0.0",
+    "playwright": "1.55"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0"
+  },
+  "build": {
+    "appId": "kr.giuk0811w.attendance",
+    "productName": "출석부",
+    "artifactName": "출석부-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "resources/**/*",
+      "build/icon.png",
+      "package.json",
+      "!**/*.map"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "출석부",
+      "artifactName": "출석부-설치-${version}.${ext}",
+      "installerLanguages": [
+        "ko_KR"
+      ],
+      "language": "1042"
+    },
+    "portable": {
+      "artifactName": "출석부-무설치-${version}.${ext}"
+    },
+    "electronLanguages": [
+      "ko",
+      "en-US"
+    ],
+    "npmRebuild": false,
+    "asarUnpack": [
+      "resources/**"
+    ]
+  }
+}

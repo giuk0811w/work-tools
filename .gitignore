@@ -1,0 +1,6 @@
+node_modules/
+attendance/dist/
+attendance/out/
+*.log
+.DS_Store
+test/out/
