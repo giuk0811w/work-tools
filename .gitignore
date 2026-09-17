@@ -3,4 +3,4 @@ attendance/dist/
 attendance/out/
 *.log
 .DS_Store
-test/out/
+attendance/test/out/
