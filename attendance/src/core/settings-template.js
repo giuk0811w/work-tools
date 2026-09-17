@@ -17,7 +17,7 @@ const HEADERS = {
   students: ['과목명', '소속교', '학번', '이름', '수강취소일'],
   holidays: ['날짜', '사유', '적용과목'],
   extras: ['과목명', '날짜', '차시수', '시작시각', '종료시각', '사유'],
-  events: ['소속교', '날짜', '사유'],
+  events: ['소속교', '시작일', '종료일', '학생이름', '사유', '공문접수'],
 };
 
 const GUIDE_TEXT = [
@@ -34,7 +34,9 @@ const GUIDE_TEXT = [
   '8. [휴업일] 시트: 수업이 없는 날. 적용과목이 비어 있으면 모든 과목에 적용됩니다.',
   '   특정 과목만이면 과목명을 쉼표로 구분해 적습니다.',
   '9. [보강] 시트: 정규 요일 외에 추가로 수업한 날. 같은 날짜에 정규 수업이 있으면 보강 내용으로 대체됩니다.',
-  '10. [소속교행사] 시트: 소속교의 시험·행사일. 그 학교 학생은 해당 날짜에 인정결석(대기)으로 자동 표시됩니다.',
+  '10. [소속교행사] 시트: 인정결석 사전 등록. 소속교의 시험·행사일이나 공문으로 받은 개별 학생의 결석 기간을 적습니다.',
+  '    종료일이 비어 있으면 하루입니다. 학생이름이 비어 있으면 그 학교 학생 전체, 여러 명이면 쉼표로 구분합니다.',
+  '    공문접수 열에 O를 적으면 바로 인정결석으로, 비워 두면 인정결석(대기)으로 표시됩니다.',
   '11. 업로드하면 과목명과 학생(소속교·학번·이름)이 같은 항목은 기존 기록을 그대로 유지합니다.',
   '    양식에서 빠진 학생은 기록이 없으면 삭제되고, 기록이 있으면 수강취소 처리됩니다.',
 ];
@@ -75,7 +77,7 @@ async function buildSettingsTemplate(semester, settings = {}) {
   const extraRows = [];
   for (const s of sem.subjects) for (const x of s.extras) if (x.source !== 'import') extraRows.push([s.name, x.date, x.periods, x.start || '', x.end || '', x.reason || '']);
   addTable(wb, SHEETS.extras, HEADERS.extras, extraRows, [28, 12, 8, 10, 10, 30]);
-  addTable(wb, SHEETS.events, HEADERS.events, sem.schoolEvents.map((e) => [e.school, e.date, e.reason || '']), [20, 12, 40]);
+  addTable(wb, SHEETS.events, HEADERS.events, sem.schoolEvents.map((e) => [e.school, e.date, e.to && e.to !== e.date ? e.to : '', (e.names || []).join(', '), e.reason || '', e.confirmed ? 'O' : '']), [20, 12, 12, 24, 30, 10]);
   // 학번은 문자열로 유지
   wb.getWorksheet(SHEETS.students).getColumn(3).numFmt = '@';
   return Buffer.from(await wb.xlsx.writeBuffer());
@@ -176,7 +178,10 @@ async function parseSettingsTemplate(buffer) {
   for (const { r, vals } of readRows(get(SHEETS.events), HEADERS.events, warnings)) {
     const date = dateOrWarn(vals[1], `[소속교행사] ${r}행`, warnings);
     if (!date || !s(vals[0])) { if (!s(vals[0])) warnings.push(`[소속교행사] ${r}행: 소속교가 비어 있어 건너뜀`); continue; }
-    out.schoolEvents.push({ school: s(vals[0]), date, reason: s(vals[2]) });
+    const to = dateOrWarn(vals[2], `[소속교행사] ${r}행 종료일`, warnings) || date;
+    const names = s(vals[3]) ? s(vals[3]).split(/[,，、]/).map((x) => x.trim()).filter(Boolean) : [];
+    const confirmed = /^(o|O|○|y|Y|예|접수|1|true)$/.test(s(vals[5]));
+    out.schoolEvents.push({ school: s(vals[0]), date, to: to < date ? date : to, names, reason: s(vals[4]), confirmed });
   }
   return out;
 }
@@ -229,7 +234,7 @@ function applySettings(semester, parsed, { todayISO } = {}) {
   semester.subjects = kept;
   const idByName = new Map(kept.map((x) => [x.name, x.id]));
   semester.holidays = parsed.holidays.map((h) => ({ id: model.newId('hol'), date: h.date, reason: h.reason, subjectIds: h.subjectNames.length ? h.subjectNames.map((n) => idByName.get(n)).filter(Boolean) : null }));
-  semester.schoolEvents = parsed.schoolEvents.map((e) => ({ id: model.newId('evt'), school: e.school, date: e.date, reason: e.reason }));
+  semester.schoolEvents = parsed.schoolEvents.map((e) => ({ id: model.newId('evt'), school: e.school, date: e.date, to: e.to || e.date, names: e.names || [], reason: e.reason, confirmed: !!e.confirmed }));
   return summary;
 }
 

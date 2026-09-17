@@ -10,8 +10,8 @@ const U = {
   fmtFull(iso) { if (!iso) return ''; const d = U.fromISO(iso); return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 (${U.DOW[d.getDay()]})`; },
   fmtShort(iso) { if (!iso) return ''; return `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`; },
   dowKo(n) { return ['', '월', '화', '수', '목', '금', '토', '일'][n] || ''; },
-  STATUS_LABEL: { P: '출석', X: '미인정결석', W: '인정결석(대기)', E: '인정결석' },
-  STATUS_SHORT: { P: '출석', X: '미인정', W: '대기', E: '인정' },
+  STATUS_LABEL: { P: '출석', X: '결석', W: '인정결석(대기)', E: '인정결석' },
+  STATUS_SHORT: { P: '출석', X: '결석', W: '인정(대기)', E: '인정' },
   STATUS_SYMBOL: { P: 'O', X: 'X', W: '◎', E: '◎' },
   async api(name, payload) {
     const r = await window.api.invoke(name, payload);

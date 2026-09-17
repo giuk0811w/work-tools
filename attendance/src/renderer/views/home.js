@@ -5,7 +5,7 @@ window.Views = window.Views || {};
 function sessionCardHtml(it, { showDate = false } = {}) {
   const st = it.confirmed ? '<span class="tag ok">확정</span>' : (it.hasRecord ? '<span class="tag warn">입력중</span>' : '<span class="tag muted">미확인</span>');
   const sm = it.summary;
-  const counts = it.confirmed || it.hasRecord ? `<span class="meta">출석 ${sm.P} · 미인정 ${sm.X} · 대기 ${sm.W} · 인정 ${sm.E}</span>` : `<span class="meta">학생 ${it.studentCount}명</span>`;
+  const counts = it.confirmed || it.hasRecord ? `<span class="meta">출석 ${sm.P} · 결석 ${sm.X} · 인정대기 ${sm.W} · 인정 ${sm.E}</span>` : `<span class="meta">학생 ${it.studentCount}명</span>`;
   return `<div class="session-card ${it.state === 'now' ? 'now' : ''}" data-subject="${it.subjectId}" data-date="${it.session.date}">
     <div class="time">${showDate ? U.fmt(it.session.date) + '<br>' : ''}${U.esc(it.timeLabel || '시간 미설정')}</div>
     <div class="name">${U.esc(it.subjectName)} ${it.state === 'now' ? '<span class="tag info">지금</span>' : ''}</div>

@@ -6,8 +6,26 @@ function getRecord(semester, subjectId, date) {
   return semester.records[recordKey(subjectId, date)] || null;
 }
 
+// 인정결석 사전 등록(소속교 행사/공문) 중 학생·날짜에 해당하는 것
+// 항목: {id, school, date(시작), to(종료), names:[이름] (비어 있으면 학교 전체), reason, confirmed(공문 접수 여부)}
+function planFor(semester, student, date) {
+  if (!student || !student.school) return null;
+  const school = normalizeSchool(student.school);
+  const hits = semester.schoolEvents.filter((e) => {
+    if (!e.school || normalizeSchool(e.school) !== school) return false;
+    const from = e.date; const to = e.to || e.date;
+    if (date < from || date > to) return false;
+    if (Array.isArray(e.names) && e.names.length && !e.names.map((n) => String(n).trim()).includes(student.name.trim())) return false;
+    return true;
+  });
+  if (!hits.length) return null;
+  // 학생 지정 항목이 학교 전체 항목보다 우선, 그다음 공문 접수된 항목 우선
+  hits.sort((a, b) => ((b.names && b.names.length) ? 1 : 0) - ((a.names && a.names.length) ? 1 : 0) || (b.confirmed ? 1 : 0) - (a.confirmed ? 1 : 0));
+  return hits[0];
+}
+
 function schoolEventFor(semester, school, date) {
-  return semester.schoolEvents.find((e) => e.date === date && e.school && school && normalizeSchool(e.school) === normalizeSchool(school)) || null;
+  return planFor(semester, { school, name: '' }, date);
 }
 
 function normalizeSchool(s) {
@@ -27,16 +45,16 @@ function sessionView(semester, subject, session) {
   const rows = subject.students.map((student) => {
     const enrolled = isEnrolledOn(student, session.date);
     const m = record && record.marks ? record.marks[student.id] : null;
-    let statuses; let reason = ''; let docNo = ''; let docDate = ''; let auto = false;
+    let statuses; let reason = ''; let docNo = ''; let docDate = ''; let auto = false; let planId = null;
     if (m) {
       statuses = fillStatuses(m.s, session.periods);
       reason = m.reason || ''; docNo = m.docNo || ''; docDate = m.docDate || '';
     } else {
-      const ev = enrolled ? schoolEventFor(semester, student.school, session.date) : null;
-      if (ev) { statuses = fillStatuses(['W'], session.periods); reason = ev.reason || '소속교 행사'; auto = true; }
+      const ev = enrolled ? planFor(semester, student, session.date) : null;
+      if (ev) { statuses = fillStatuses([ev.confirmed ? 'E' : 'W'], session.periods); reason = ev.reason || '소속교 행사'; auto = true; planId = ev.id; }
       else statuses = fillStatuses([], session.periods);
     }
-    return { student, enrolled, statuses, reason, docNo, docDate, auto };
+    return { student, enrolled, statuses, reason, docNo, docDate, auto, planId };
   });
   return { session, record, confirmed: !!(record && record.confirmed), rows };
 }
@@ -81,38 +99,66 @@ function summarize(view) {
   return c;
 }
 
-// 전체 대기 목록
+// 전체 대기 목록: 저장된 대기 표기 + 사전 등록에서 파생된 대기(아직 저장되지 않은 것, 미래 수업 포함)
 function pendingList(semester) {
   const out = [];
   for (const subject of semester.subjects) {
-    const sessions = listSessions(semester, subject);
-    for (const session of sessions) {
-      const rec = getRecord(semester, subject.id, session.date);
-      if (!rec || !rec.marks) continue;
-      for (const [studentId, m] of Object.entries(rec.marks)) {
-        if (!m.s || !m.s.includes('W')) continue;
-        const student = subject.students.find((s) => s.id === studentId);
-        if (!student) continue;
-        out.push({ subject, session, student, mark: m, confirmed: rec.confirmed });
+    for (const session of listSessions(semester, subject)) {
+      const view = sessionView(semester, subject, session);
+      for (const r of view.rows) {
+        if (!r.enrolled || !r.statuses.includes('W')) continue;
+        const stored = !!(view.record && view.record.marks && view.record.marks[r.student.id]);
+        out.push({ subject, session, student: r.student, statuses: r.statuses, reason: r.reason, stored, planId: r.planId || null, confirmed: view.confirmed });
       }
     }
   }
-  out.sort((a, b) => (a.session.date < b.session.date ? -1 : a.session.date > b.session.date ? 1 : 0));
+  out.sort((a, b) => a.session.date.localeCompare(b.session.date) || a.subject.name.localeCompare(b.subject.name, 'ko'));
   return out;
 }
 
-// 대기 → 확정/출석/미인정 전환
-function resolvePending(semester, subjectId, date, studentId, newStatus, { docNo, docDate, reason } = {}) {
-  const rec = getRecord(semester, subjectId, date);
-  if (!rec || !rec.marks || !rec.marks[studentId]) return false;
-  const m = rec.marks[studentId];
+// 대기 → 인정결석 확정(E) 또는 출석(P)으로 전환. 저장되지 않은(사전 등록 파생) 항목이면 기록을 만들어 저장한다.
+function resolvePending(semester, subjectId, date, studentId, newStatus, { reason } = {}) {
+  const subject = semester.subjects.find((s) => s.id === subjectId);
+  if (!subject) return false;
+  const student = subject.students.find((s) => s.id === studentId);
+  if (!student) return false;
+  const session = listSessions(semester, subject).find((s) => s.date === date);
+  if (!session) return false;
+  const key = recordKey(subjectId, date);
+  const rec = semester.records[key] || (semester.records[key] = { confirmed: false, confirmedAt: null, marks: {} });
+  if (!rec.marks) rec.marks = {};
+  let m = rec.marks[studentId];
+  if (!m) {
+    const plan = planFor(semester, student, date);
+    m = { s: fillStatuses([plan ? 'W' : 'P'], session.periods), reason: (plan && plan.reason) || '', docNo: '', docDate: '' };
+    rec.marks[studentId] = m;
+  }
   m.s = m.s.map((x) => (x === 'W' ? newStatus : x));
-  if (docNo != null) m.docNo = docNo;
-  if (docDate != null) m.docDate = docDate;
   if (reason != null) m.reason = reason;
-  if (m.s.every((x) => x === 'P') && !m.reason && !m.docNo && !m.docDate) delete rec.marks[studentId];
+  if (m.s.every((x) => x === 'P') && !m.docNo && !m.docDate) delete rec.marks[studentId];
   rec.updatedAt = new Date().toISOString();
   return true;
+}
+
+// 사전 등록 항목의 공문 접수 여부 변경. 접수로 바꾸면 이미 저장된 대기 표기도 인정결석으로 바꾼다.
+function setPlanConfirmed(semester, planId, confirmed) {
+  const plan = semester.schoolEvents.find((e) => e.id === planId);
+  if (!plan) return 0;
+  plan.confirmed = !!confirmed;
+  if (!confirmed) return 0;
+  let changed = 0;
+  for (const subject of semester.subjects) {
+    for (const student of subject.students) {
+      for (const [key, rec] of Object.entries(semester.records)) {
+        if (!key.startsWith(subject.id + '|') || !rec.marks || !rec.marks[student.id]) continue;
+        const date = key.split('|')[1];
+        if (planFor(semester, student, date) !== plan) continue;
+        const m = rec.marks[student.id];
+        if (m.s.includes('W')) { m.s = m.s.map((x) => (x === 'W' ? 'E' : x)); changed += 1; }
+      }
+    }
+  }
+  return changed;
 }
 
 // 미확정 지난 수업 목록 (오늘 포함 여부 선택)
@@ -155,6 +201,6 @@ function registerMatrix(semester, subject, { from, to, todayISO } = {}) {
 }
 
 module.exports = {
-  getRecord, sessionView, compactMarks, saveRecord, summarize, pendingList, resolvePending,
-  unconfirmedSessions, registerMatrix, fillStatuses, schoolEventFor, normalizeSchool,
+  getRecord, sessionView, compactMarks, saveRecord, summarize, pendingList, resolvePending, setPlanConfirmed,
+  unconfirmedSessions, registerMatrix, fillStatuses, schoolEventFor, planFor, normalizeSchool,
 };

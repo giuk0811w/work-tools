@@ -96,14 +96,48 @@ test('marks: default present, school event auto pending, save/confirm, pending l
   const pending = marks.pendingList(sem);
   assert.equal(pending.length, 1);
   assert.equal(pending[0].student.name, '학생B');
-  assert.ok(marks.resolvePending(sem, sub.id, session.date, sub.students[1].id, 'E', { docNo: '가나고-123', docDate: '2026-08-20' }));
+  assert.ok(marks.resolvePending(sem, sub.id, session.date, sub.students[1].id, 'E'));
   assert.equal(marks.pendingList(sem).length, 0);
   assert.deepEqual(marks.sessionView(sem, sub, session).rows[1].statuses, ['E', 'E']);
-  assert.equal(marks.sessionView(sem, sub, session).rows[1].docNo, '가나고-123');
+  assert.equal(marks.sessionView(sem, sub, session).rows[1].reason, '1회고사');
   // 대기 → 출석으로 되돌리면 항목 삭제
   marks.saveRecord(sem, sub.id, '2026-08-20', { [sub.students[0].id]: { s: ['W', 'W'], reason: '', docNo: '', docDate: '' } }, { confirm: true });
   marks.resolvePending(sem, sub.id, '2026-08-20', sub.students[0].id, 'P');
   assert.equal(sem.records[model.recordKey(sub.id, '2026-08-20')].marks[sub.students[0].id], undefined);
+});
+
+test('marks: advance plans (range, named students, confirmed), derived pending, plan confirm', () => {
+  const { sem, sub } = makeSemester();
+  // 다라고 전체, 9/3~9/10 시험 (공문 미접수)
+  sem.schoolEvents.push({ id: 'p1', school: '다라고', date: '2026-09-03', to: '2026-09-10', names: [], reason: '2회고사', confirmed: false });
+  // 가나고 학생A 개별 공문 (접수됨) 9/17
+  sem.schoolEvents.push({ id: 'p2', school: '가나고', date: '2026-09-17', to: '2026-09-17', names: ['학생A'], reason: '병원 진료', confirmed: true });
+  const sessions = listSessions(sem, sub);
+  const v903 = marks.sessionView(sem, sub, sessions.find((s) => s.date === '2026-09-03'));
+  assert.deepEqual(v903.rows[1].statuses, ['W', 'W']); assert.equal(v903.rows[1].planId, 'p1');
+  assert.deepEqual(v903.rows[0].statuses, ['P', 'P']);
+  const v910 = marks.sessionView(sem, sub, sessions.find((s) => s.date === '2026-09-10'));
+  assert.deepEqual(v910.rows[1].statuses, ['W', 'W']);
+  const v917 = marks.sessionView(sem, sub, sessions.find((s) => s.date === '2026-09-17'));
+  assert.deepEqual(v917.rows[0].statuses, ['E', 'E']); assert.equal(v917.rows[0].reason, '병원 진료');
+  assert.deepEqual(v917.rows[1].statuses, ['P', 'P']);
+  // 파생 대기 목록 (미래 포함): 9/3, 9/10 학생B
+  let pending = marks.pendingList(sem);
+  assert.deepEqual(pending.map((p) => `${p.session.date}:${p.student.name}:${p.stored}`), ['2026-09-03:학생B:false', '2026-09-10:학생B:false']);
+  // 파생 항목 체크 → 기록 생성 + E
+  assert.ok(marks.resolvePending(sem, sub.id, '2026-09-03', sub.students[1].id, 'E'));
+  assert.deepEqual(marks.sessionView(sem, sub, sessions.find((s) => s.date === '2026-09-03')).rows[1].statuses, ['E', 'E']);
+  assert.equal(marks.pendingList(sem).length, 1);
+  // 9/10 수업을 대기 상태로 확정 저장한 뒤 항목 공문 접수 → 저장된 W도 E로
+  const v = marks.sessionView(sem, sub, sessions.find((s) => s.date === '2026-09-10'));
+  marks.saveRecord(sem, sub.id, '2026-09-10', marks.compactMarks(v.rows, 2), { confirm: true });
+  assert.equal(marks.pendingList(sem)[0].stored, true);
+  assert.equal(marks.setPlanConfirmed(sem, 'p1', true), 1);
+  assert.equal(marks.pendingList(sem).length, 0);
+  assert.deepEqual(marks.sessionView(sem, sub, sessions.find((s) => s.date === '2026-09-10')).rows[1].statuses, ['E', 'E']);
+  // migrate가 옛 형식 항목을 보정
+  const d = model.migrate({ semesters: [{ id: 's', subjects: [], schoolEvents: [{ id: 'x', school: 'A', date: '2026-01-01', reason: '' }] }] });
+  assert.deepEqual(d.semesters[0].schoolEvents[0], { id: 'x', school: 'A', date: '2026-01-01', reason: '', to: '2026-01-01', names: [], confirmed: false });
 });
 
 test('marks: unconfirmed sessions and register matrix', () => {

@@ -32,9 +32,9 @@ window.Views.entry = {
           ${periods > 1 ? `<label class="inline small no-print" style="margin-left:auto"><input type="checkbox" id="split" ${splitMode ? 'checked' : ''}> 차시별로 따로 입력 (${periods}차시 연강)</label>` : ''}
         </div>
         <div class="panel">
-          <div class="small muted" style="margin-bottom:8px">체크하지 않은 학생은 출석으로 처리됩니다. 소속교 행사가 등록된 학생은 인정결석(대기)으로 미리 표시됩니다.</div>
+          <div class="small muted" style="margin-bottom:8px">누르지 않은 학생은 출석으로 처리됩니다. 사전 등록된 소속교 행사·공문이 있는 학생은 인정결석으로 미리 표시됩니다(공문 접수 전이면 대기).</div>
           <table class="entry-table">
-            <thead><tr><th style="width:40px">번호</th><th>소속교</th><th style="width:90px">학번</th><th style="width:110px">이름</th><th>${splitMode ? '차시별 출결' : '출결'}</th><th style="width:220px">사유 / 공문번호</th></tr></thead>
+            <thead><tr><th style="width:40px">번호</th><th>소속교</th><th style="width:90px">학번</th><th style="width:110px">이름</th><th>${splitMode ? '차시별 출결' : '출결'}</th><th style="width:220px">비고</th></tr></thead>
             <tbody>${rows.map((r, i) => rowHtml(r, i)).join('')}</tbody>
           </table>
         </div>
@@ -58,7 +58,6 @@ window.Views.entry = {
         r.auto = false;
         refreshRow(Number(b.dataset.row));
       }));
-      main.querySelectorAll('input[data-field]').forEach((inp) => inp.addEventListener('input', () => { const r = rows[Number(inp.dataset.row)]; r[inp.dataset.field] = inp.value; }));
       const sd = main.querySelector('#save-draft'); if (sd) sd.addEventListener('click', () => save(false));
       const cf = main.querySelector('#confirm'); if (cf) cf.addEventListener('click', () => save(true));
       const ed = main.querySelector('#edit'); if (ed) ed.addEventListener('click', async () => { if (await U.confirm('수정', '확정된 출결을 수정합니다. 수정 후 다시 확인 버튼을 눌러 주세요.')) { editing = true; draw(); } });
@@ -69,11 +68,10 @@ window.Views.entry = {
       return `<span class="status-group">${['P', 'X', 'W', 'E'].map((s) => `<button data-row="${i}" data-period="${p}" data-status="${s}" class="${cur === s ? 'sel-' + s : ''}" ${editing ? '' : 'disabled'}>${U.STATUS_SHORT[s]}</button>`).join('')}</span>`;
     }
     function rowHtml(r, i) {
-      const needInfo = r.statuses.some((s) => s === 'W' || s === 'E' || s === 'X');
       return `<tr id="row-${i}" class="${r.enrolled ? '' : 'disabled'}">
         <td class="center">${i + 1}</td><td>${U.esc(r.student.school)}</td><td>${U.esc(r.student.no)}</td><td class="name">${U.esc(r.student.name)}${r.enrolled ? '' : ' <span class="tag muted">수강취소</span>'}</td>
-        <td>${r.enrolled ? (splitMode ? r.statuses.map((s, p) => `<div class="row" style="margin:2px 0"><span class="small muted" style="width:52px">${v.session.seq + p}차시</span>${statusButtons(r, i, p)}</div>`).join('') : statusButtons(r, i, 'all')) : '<span class="muted small">해당 없음</span>'} ${r.auto ? '<span class="tag warn small">행사 자동</span>' : ''}</td>
-        <td>${r.enrolled ? `<input type="text" data-row="${i}" data-field="reason" placeholder="사유" value="${U.esc(r.reason)}" ${editing ? '' : 'disabled'} style="${needInfo ? '' : 'opacity:.6'}"><input type="text" data-row="${i}" data-field="docNo" placeholder="공문번호 (인정결석)" value="${U.esc(r.docNo)}" ${editing ? '' : 'disabled'} style="margin-top:3px;${needInfo ? '' : 'opacity:.6'}">` : ''}</td>
+        <td>${r.enrolled ? (splitMode ? r.statuses.map((s, p) => `<div class="row" style="margin:2px 0"><span class="small muted" style="width:52px">${v.session.seq + p}차시</span>${statusButtons(r, i, p)}</div>`).join('') : statusButtons(r, i, 'all')) : '<span class="muted small">해당 없음</span>'}</td>
+        <td class="small">${r.enrolled && r.reason ? U.esc(r.reason) : ''}${r.enrolled && r.auto ? ' <span class="tag warn">사전 등록</span>' : ''}</td>
       </tr>`;
     }
     function refreshRow(i) {
@@ -86,14 +84,13 @@ window.Views.entry = {
         if (p === 'all') r.statuses = r.statuses.map(() => b.dataset.status); else r.statuses[Number(p)] = b.dataset.status;
         r.auto = false; refreshRow(i);
       }));
-      main.querySelectorAll(`#row-${i} input[data-field]`).forEach((inp) => inp.addEventListener('input', () => { rows[i][inp.dataset.field] = inp.value; }));
       updateSummary();
     }
     function updateSummary() {
       const c = { P: 0, X: 0, W: 0, E: 0 };
       for (const r of rows) { if (!r.enrolled) continue; const st = r.statuses.includes('X') ? 'X' : r.statuses.includes('W') ? 'W' : r.statuses.includes('E') ? 'E' : 'P'; c[st] += 1; }
       const el = main.querySelector('#summary');
-      if (el) el.innerHTML = `<div class="item">출석 <b>${c.P}</b></div><div class="item">미인정결석 <b>${c.X}</b></div><div class="item">인정결석 대기 <b>${c.W}</b></div><div class="item">인정결석 <b>${c.E}</b></div>`;
+      if (el) el.innerHTML = `<div class="item">출석 <b>${c.P}</b></div><div class="item">결석 <b>${c.X}</b></div><div class="item">인정결석 대기 <b>${c.W}</b></div><div class="item">인정결석 <b>${c.E}</b></div>`;
     }
     async function save(confirm) {
       try {

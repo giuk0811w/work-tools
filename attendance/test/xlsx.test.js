@@ -61,7 +61,7 @@ test('settings template: roundtrip and apply preserves ids/records', async () =>
   const draft = await parseAttendanceWorkbook(fs.readFileSync(FIXTURE));
   const sem = buildSemesterFromImport(draft, { todayISO: '2026-09-17' });
   sem.holidays.push({ id: 'h', date: '2026-10-05', reason: '대체휴일', subjectIds: null });
-  sem.schoolEvents.push({ id: 'e', school: '다라고등학교', date: '2026-10-20', reason: '학력평가' });
+  sem.schoolEvents.push({ id: 'e', school: '다라고등학교', date: '2026-10-20', to: '2026-10-21', names: ['학생02'], reason: '학력평가', confirmed: true });
   const eco = sem.subjects.find((s) => s.name === '경제');
   eco.schedule = [{ dow: 4, start: '14:00', end: '15:40', periods: 2 }];
   const buf = await buildSettingsTemplate(sem, { teacher: '홍길동' });
@@ -73,7 +73,7 @@ test('settings template: roundtrip and apply preserves ids/records', async () =>
   assert.equal(peco.students.length, 8);
   assert.equal(peco.students[0].no, '3');
   assert.deepEqual(parsed.holidays, [{ date: '2026-10-05', reason: '대체휴일', subjectNames: [] }]);
-  assert.deepEqual(parsed.schoolEvents, [{ school: '다라고등학교', date: '2026-10-20', reason: '학력평가' }]);
+  assert.deepEqual(parsed.schoolEvents, [{ school: '다라고등학교', date: '2026-10-20', to: '2026-10-21', names: ['학생02'], reason: '학력평가', confirmed: true }]);
   assert.equal(parsed.semester.name, '2026학년도 2학기');
   assert.equal(parsed.settings.teacher, '홍길동');
   // 수정 후 적용: 학생 한 명 제거(기록 있음 → 수강취소), 새 학생 추가, 과목 시간 변경

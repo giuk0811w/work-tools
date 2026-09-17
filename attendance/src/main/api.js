@@ -143,15 +143,31 @@ function createApi({ store, getWindow, getAutoLaunch, setAutoLaunch, isPortable 
     // ----- 대기 목록 -----
     'pending.list': () => marks.pendingList(sem()).map((p) => ({
       subjectId: p.subject.id, subjectName: p.subject.name, date: p.session.date, seqLabel: schedule.seqLabel(p.session),
-      studentId: p.student.id, student: p.student, reason: p.mark.reason || '', docNo: p.mark.docNo || '', docDate: p.mark.docDate || '', confirmed: p.confirmed,
-      periods: p.mark.s.map((x, i) => (x === 'W' ? i + 1 : null)).filter(Boolean),
+      studentId: p.student.id, student: p.student, reason: p.reason || '', stored: p.stored, planId: p.planId, sessionConfirmed: p.confirmed,
+      future: p.session.date > today(),
+      periods: p.statuses.map((x, i) => (x === 'W' ? i + 1 : null)).filter(Boolean),
     })),
-    'pending.resolve': ({ subjectId, date, studentId, status, docNo, docDate, reason }) => {
+    'pending.resolve': ({ subjectId, date, studentId, status }) => {
       const s = sem();
-      if (!['E', 'P', 'X'].includes(status)) throw new Error('잘못된 상태입니다.');
-      if (!marks.resolvePending(s, subjectId, date, studentId, status, { docNo, docDate, reason })) throw new Error('대기 항목을 찾을 수 없습니다.');
+      if (!['E', 'P'].includes(status)) throw new Error('잘못된 상태입니다.');
+      if (!marks.resolvePending(s, subjectId, date, studentId, status)) throw new Error('대기 항목을 찾을 수 없습니다.');
       save();
       return true;
+    },
+    'pending.resolveMany': ({ items, status }) => {
+      const s = sem();
+      if (!['E', 'P'].includes(status)) throw new Error('잘못된 상태입니다.');
+      let n = 0;
+      for (const it of items || []) if (marks.resolvePending(s, it.subjectId, it.date, it.studentId, status)) n += 1;
+      save();
+      return n;
+    },
+    'plan.confirm': ({ id, confirmed }) => {
+      const s = sem();
+      if (!s.schoolEvents.find((e) => e.id === id)) throw new Error('항목을 찾을 수 없습니다.');
+      const changed = marks.setPlanConfirmed(s, id, !!confirmed);
+      save();
+      return { changed };
     },
 
     // ----- 출석부 열람 -----
@@ -283,14 +299,20 @@ function createApi({ store, getWindow, getAutoLaunch, setAutoLaunch, isPortable 
       save(); return h;
     },
     'holiday.delete': ({ id }) => { const s = sem(); s.holidays = s.holidays.filter((x) => x.id !== id); save(); return true; },
-    'event.save': ({ id, school, date, reason }) => {
+    'event.save': ({ id, school, date, to, names, reason, confirmed }) => {
       const s = sem();
-      if (!dates.isISODate(date)) throw new Error('날짜 형식이 잘못되었습니다.');
+      if (!dates.isISODate(date)) throw new Error('시작일 형식이 잘못되었습니다.');
+      if (to && !dates.isISODate(to)) throw new Error('종료일 형식이 잘못되었습니다.');
+      if (to && to < date) throw new Error('종료일이 시작일보다 앞섭니다.');
       if (!school || !String(school).trim()) throw new Error('소속교를 입력하세요.');
       let e = id ? s.schoolEvents.find((x) => x.id === id) : null;
       if (!e) { e = { id: model.newId('evt') }; s.schoolEvents.push(e); }
-      e.school = String(school).trim(); e.date = date; e.reason = (reason || '').trim();
+      e.school = String(school).trim(); e.date = date; e.to = to || date; e.reason = (reason || '').trim();
+      e.names = Array.isArray(names) ? names.map((n) => String(n).trim()).filter(Boolean) : (typeof names === 'string' ? names.split(/[,，、\n]/).map((n) => n.trim()).filter(Boolean) : []);
+      const wasConfirmed = !!e.confirmed;
+      e.confirmed = !!confirmed;
       s.schoolEvents.sort((a, b) => a.date.localeCompare(b.date));
+      if (e.confirmed && !wasConfirmed) marks.setPlanConfirmed(s, e.id, true);
       save(); return e;
     },
     'event.delete': ({ id }) => { const s = sem(); s.schoolEvents = s.schoolEvents.filter((x) => x.id !== id); save(); return true; },
@@ -323,6 +345,16 @@ function createApi({ store, getWindow, getAutoLaunch, setAutoLaunch, isPortable 
       const set = new Set();
       for (const sub of sem().subjects) for (const st of sub.students) if (st.school) set.add(st.school);
       return [...set].sort((a, b) => a.localeCompare(b, 'ko'));
+    },
+    'students.bySchool': () => {
+      const map = {};
+      for (const sub of sem().subjects) for (const st of sub.students) {
+        if (!st.school) continue;
+        if (!map[st.school]) map[st.school] = [];
+        if (!map[st.school].some((x) => x.name === st.name)) map[st.school].push({ name: st.name, no: st.no });
+      }
+      for (const k of Object.keys(map)) map[k].sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+      return map;
     },
 
     // ----- 기존 출석부 가져오기 -----

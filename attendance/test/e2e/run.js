@@ -57,7 +57,6 @@ const OUT = path.join(ROOT, 'test', 'out', 'e2e');
   await page.waitForSelector('.entry-table');
   await page.click('#row-0 .status-group button[data-status="X"]');
   await page.click('#row-1 .status-group button[data-status="W"]');
-  await page.fill('#row-1 input[data-field="reason"]', '소속교 시험');
   await shot('04-entry');
   await page.click('#confirm');
   await page.waitForSelector('.session-card');
@@ -74,12 +73,10 @@ const OUT = path.join(ROOT, 'test', 'out', 'e2e');
   console.log('pending rows', pendingRows.length);
   assert.ok(pendingRows.length >= 3); // 기후변화 2건 + 경제 1건
   const ecoRow = page.locator('tbody tr', { hasText: '경제' }).first();
-  await ecoRow.locator('input[data-f="docNo"]').fill('다라고-2026-100');
-  await ecoRow.locator('button[data-act="E"]').click();
-  await page.waitForTimeout(400);
+  await ecoRow.locator('input[data-i]').click({ noWaitAfter: true });
+  await page.waitForTimeout(500);
   const sess2 = await api('session.get', { subjectId: eco.id, date: '2026-09-17' });
   assert.deepEqual(sess2.result.rows[1].statuses, ['E', 'E']);
-  assert.equal(sess2.result.rows[1].docNo, '다라고-2026-100');
 
   // 6) 검색
   await page.click('.nav-btn[data-view="search"]');
@@ -117,11 +114,28 @@ const OUT = path.join(ROOT, 'test', 'out', 'e2e');
   const after = await api('session.search', { subjectId: eco.id });
   assert.equal(after.result.length, before.result.length - 1);
   assert.ok(!after.result.find((s) => s.session.date === '2026-09-24'));
-  const ev = await api('event.save', { school: '파하고등학교', date: '2026-10-01', reason: '1회고사' });
+  const ev = await api('event.save', { school: '파하고등학교', date: '2026-10-01', to: '2026-10-08', reason: '1회고사', confirmed: false });
   assert.ok(ev.ok, ev.error);
   const oct1 = await api('session.get', { subjectId: eco.id, date: '2026-10-01' });
   assert.ok(oct1.result.session, 'session on 10/01');
   assert.ok(oct1.result.rows.every((r) => r.statuses[0] === 'W' && r.auto), 'auto pending from school event');
+  const oct8 = await api('session.get', { subjectId: eco.id, date: '2026-10-08' });
+  assert.ok(oct8.result.rows.every((r) => r.statuses[0] === 'W'), 'range end included');
+  // 대기 목록에 미래 파생 건이 보이고, 항목 공문 접수 체크 시 인정결석으로
+  const pl = await api('pending.list');
+  assert.ok(pl.result.filter((p) => p.future && !p.stored).length >= 16, 'derived future pending');
+  await page.evaluate(() => window.App.go('pending'));
+  await page.waitForSelector('input[data-plan]');
+  await shot('05b-pending-plans');
+  await page.click(`input[data-plan="${ev.result.id}"]`, { noWaitAfter: true });
+  await page.waitForTimeout(500);
+  const oct1b = await api('session.get', { subjectId: eco.id, date: '2026-10-01' });
+  assert.ok(oct1b.result.rows.every((r) => r.statuses[0] === 'E'), 'plan confirmed → E');
+  // 개별 학생 사전 등록 (공문 접수됨) → 해당 학생만 E
+  const one = await api('event.save', { school: '파하고등학교', date: '2026-10-15', names: ['학생10'], reason: '병원 진료', confirmed: true });
+  assert.ok(one.ok, one.error);
+  const oct15 = await api('session.get', { subjectId: eco.id, date: '2026-10-15' });
+  assert.deepEqual(oct15.result.rows.map((r) => r.statuses[0]), ['P', 'P', 'E', 'P', 'P', 'P', 'P', 'P']);
 
   // 9) 양식 내려받기/업로드 왕복
   const tplOut = path.join(OUT, 'settings-template.xlsx');

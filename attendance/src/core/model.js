@@ -8,7 +8,7 @@ const STATUS = {
   W: 'W', // 인정결석 (대기: 공문 미접수)
   E: 'E', // 인정결석 (확정)
 };
-const STATUS_LABEL = { P: '출석', X: '미인정결석', W: '인정결석(대기)', E: '인정결석' };
+const STATUS_LABEL = { P: '출석', X: '결석', W: '인정결석(대기)', E: '인정결석' };
 const STATUS_SYMBOL = { P: 'O', X: 'X', W: '◎', E: '◎' };
 const STATUS_LIST = ['P', 'X', 'W', 'E'];
 
@@ -47,7 +47,7 @@ function newSemester({ name, start, end, school, id } = {}) {
     createdAt: new Date().toISOString(),
     subjects: [],
     holidays: [],      // {id, date, reason, subjectIds: null | [id]}
-    schoolEvents: [],  // {id, school, date, reason}
+    schoolEvents: [],  // 인정결석 사전 등록 {id, school, date, to, names:[], reason, confirmed}
     records: {},       // "subjectId|date" -> {confirmed, confirmedAt, marks:{studentId:{s:[...], reason, docNo, docDate}}}
   };
 }
@@ -120,6 +120,11 @@ function migrate(data) {
   for (const sem of data.semesters) {
     const b = newSemester({ id: sem.id });
     for (const k of Object.keys(b)) if (sem[k] === undefined) sem[k] = b[k];
+    for (const e of sem.schoolEvents) {
+      if (!e.to) e.to = e.date;
+      if (!Array.isArray(e.names)) e.names = [];
+      e.confirmed = !!e.confirmed;
+    }
     for (const sub of sem.subjects) {
       const bs = newSubject({ id: sub.id });
       for (const k of Object.keys(bs)) if (sub[k] === undefined) sub[k] = bs[k];
