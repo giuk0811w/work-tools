@@ -21,6 +21,7 @@ const SettingsTabs = {
   // ---------- 학기 ----------
   async semester(body) {
     const st = App.state;
+    const tpl = st.semester ? await U.api('registerTemplate.info') : null;
     body.innerHTML = `
       <div class="grid-2">
         <div class="panel">
@@ -37,14 +38,20 @@ const SettingsTabs = {
         </div>
         <div>
           <div class="panel">
-            <h2 style="margin-top:0">기존 엑셀 출석부 가져오기</h2>
-            <p class="small muted">지금 쓰시는 출석부 파일(과목별 시트)을 그대로 읽어 과목·명단·지금까지의 출결 기록을 새 학기로 가져옵니다. 지난 수업은 확정으로, 미래 날짜의 ◎는 대기로 들어옵니다.</p>
-            <button class="btn primary" id="import-pick">엑셀 파일 선택…</button>
-          </div>
-          <div class="panel">
             <h2 style="margin-top:0">설정 양식으로 셋팅</h2>
-            <p class="small muted">과목, 요일·시간, 수강생 명단, 휴업일, 소속교 행사를 엑셀 양식에 적어 올리면 한 번에 반영됩니다. 양식에는 현재 설정이 미리 채워져 있습니다.</p>
+            <p class="small muted">과목, 요일·시간, 수강생 명단, 휴업일, 인정결석 사전 등록을 엑셀 양식에 적어 올리면 한 번에 반영됩니다. 양식에는 현재 설정이 미리 채워져 있습니다. 매 학기 이 방법으로 셋팅합니다.</p>
             <div class="row"><button class="btn" id="tpl-download">양식 내려받기</button><button class="btn primary" id="tpl-upload">작성한 양식 업로드…</button></div>
+          </div>
+          ${tpl ? `<div class="panel">
+            <h2 style="margin-top:0">출석부 출력 양식</h2>
+            <p class="small muted">엑셀로 내보낼 때 쓰는 출석부 서식입니다. 학기마다 서식이 바뀌면 새 서식 파일을 올려 주세요. 파일에 시트가 여러 개면 "양식" 시트를, 없으면 첫 시트를 서식으로 씁니다. 표의 첫 열 제목이 "연번", 차시 열 제목이 "1차시, 2차시…" 형태여야 합니다.</p>
+            <div class="kv"><label>현재 양식</label><div>${tpl.custom ? `<b>${U.esc(tpl.name)}</b> <span class="small muted">(${U.esc(tpl.sheet)} 시트, ${U.esc(tpl.summary)}, ${new Date(tpl.uploadedAt).toLocaleDateString('ko-KR')} 업로드)</span>` : '기본 양식 <span class="small muted">(앱에 내장된 강원온라인학교 서식)</span>'}${tpl.missing ? ' <span class="tag danger">업로드한 파일을 찾을 수 없어 기본 양식을 씁니다</span>' : ''}</div></div>
+            <div class="row" style="margin-top:10px"><button class="btn primary" id="rt-upload">양식 파일 업로드…</button><button class="btn" id="rt-download">현재 양식 내려받기</button>${tpl.custom ? '<button class="btn danger" id="rt-reset">기본 양식으로 되돌리기</button>' : ''}</div>
+          </div>` : ''}
+          <div class="panel">
+            <h2 style="margin-top:0">기존 엑셀 출석부에서 기록 가져오기 <span class="tag muted">이번 학기 한정</span></h2>
+            <p class="small muted">앱 도입 전에 엑셀로 적어 둔 이번 학기 기록을 옮길 때 한 번만 씁니다. 과목별 시트에서 명단과 지금까지의 출결을 읽어 새 학기로 가져옵니다. 지난 수업은 확정으로, 미래 날짜의 ◎는 대기로 들어옵니다.</p>
+            <button class="btn" id="import-pick">엑셀 파일 선택…</button>
           </div>
         </div>
       </div>`;
@@ -59,6 +66,9 @@ const SettingsTabs = {
     q('#import-pick').addEventListener('click', () => importDialog());
     q('#tpl-download').addEventListener('click', async () => { try { const f = await U.api('template.download'); if (f) { const r = await U.modal({ title: '양식 저장 완료', html: `<p>${U.esc(f)}</p><p class="small muted">엑셀에서 열어 작성한 뒤 "작성한 양식 업로드"로 올려 주세요.</p>`, buttons: [{ label: '닫기', value: false }, { label: '파일 열기', cls: 'primary', value: true }] }); if (r) U.api('shell.open', { target: f }); } } catch (e) { U.toast(e.message, true); } });
     q('#tpl-upload').addEventListener('click', () => templateDialog());
+    if (q('#rt-upload')) q('#rt-upload').addEventListener('click', async () => { try { const r = await U.api('registerTemplate.pick'); if (r) { U.toast(`출석부 양식을 바꿨습니다: ${r.summary}`, false, 4000); go('semester'); } } catch (e) { U.alert('양식 업로드 실패', `<p>${U.esc(e.message)}</p>`); } });
+    if (q('#rt-download')) q('#rt-download').addEventListener('click', async () => { try { const f = await U.api('registerTemplate.download'); if (f) U.toast(`저장했습니다: ${f}`, false, 4000); } catch (e) { U.toast(e.message, true); } });
+    if (q('#rt-reset')) q('#rt-reset').addEventListener('click', async () => { if (await U.confirm('기본 양식으로 되돌리기', '업로드한 출석부 양식을 지우고 앱에 내장된 기본 양식을 씁니다.', { danger: true })) { await U.api('registerTemplate.reset'); go('semester'); } });
   },
 
   // ---------- 과목 ----------

@@ -101,6 +101,15 @@ const OUT = path.join(ROOT, 'test', 'out', 'e2e');
   assert.ok(fs.existsSync(xlsxOut));
   console.log('export stats', JSON.stringify(ex.result.stats));
 
+  // 7b) 출석부 양식 업로드 (전체 출석부 파일을 양식으로) → 내보내기에 반영
+  const rt = await api('registerTemplate.pick', { file: FIXTURE });
+  assert.ok(rt.ok, rt.error);
+  assert.equal(rt.result.custom, true);
+  const ex2 = await api('export.xlsx', { file: path.join(OUT, 'register-custom.xlsx'), subjectIds: [eco.id] });
+  assert.ok(ex2.ok && ex2.result.customTemplate, ex2.error);
+  const rtReset = await api('registerTemplate.reset');
+  assert.equal(rtReset.result.custom, false);
+
   // 8) 설정 화면들
   for (const tab of ['semester', 'subjects', 'students', 'calendar', 'data', 'app']) {
     await page.evaluate((t) => window.App.go('settings', { tab: t }), tab);

@@ -49,6 +49,7 @@ function newSemester({ name, start, end, school, id } = {}) {
     holidays: [],      // {id, date, reason, subjectIds: null | [id]}
     schoolEvents: [],  // 인정결석 사전 등록 {id, school, date, to, names:[], reason, confirmed}
     records: {},       // "subjectId|date" -> {confirmed, confirmedAt, marks:{studentId:{s:[...], reason, docNo, docDate}}}
+    registerTemplate: null, // 학기별 출석부 출력 양식 {file, name, sheet, summary, uploadedAt} (없으면 기본 양식)
   };
 }
 

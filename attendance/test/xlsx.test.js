@@ -6,7 +6,7 @@ const path = require('path');
 const ExcelJS = require('exceljs');
 const { parseAttendanceWorkbook, buildSemesterFromImport } = require('../src/core/importer');
 const { buildSettingsTemplate, parseSettingsTemplate, applySettings } = require('../src/core/settings-template');
-const { buildRegisterWorkbook, exportPrecheck } = require('../src/core/exporter');
+const { buildRegisterWorkbook, exportPrecheck, inspectTemplate } = require('../src/core/exporter');
 const { listSessions } = require('../src/core/schedule');
 const marks = require('../src/core/marks');
 const model = require('../src/core/model');
@@ -152,4 +152,25 @@ test('exporter: adds blocks beyond 4 when periods exceed 68', async () => {
   assert.equal(ws.getCell('B145').value, '많은과목');
   assert.equal(ws.getCell('E149').value, '가');
   assert.ok(ws.model.merges.includes('S144:V145'));
+});
+
+test('exporter: custom template file (full attendance workbook) is used and its sheets are dropped', async () => {
+  const draft = await parseAttendanceWorkbook(fs.readFileSync(FIXTURE));
+  const sem = buildSemesterFromImport(draft, { todayISO: '2026-09-17' });
+  const { buffer, layout } = await buildRegisterWorkbook(sem, { todayISO: '2026-09-17', templatePath: FIXTURE, subjectIds: [sem.subjects[2].id] });
+  assert.equal(layout, '표 4개 × 17차시, 학생 25명/표, 비고 칸 있음');
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buffer);
+  assert.deepEqual(wb.worksheets.map((w) => w.name), ['경제']);
+  const ws = wb.getWorksheet('경제');
+  assert.equal(ws.getCell('B5').value, '경제');
+  assert.equal(ws.getCell('E9').value, '학생08');
+  assert.equal(ws.getCell('F9').value, 'O');
+});
+
+test('exporter: inspectTemplate rejects a non-register workbook', async () => {
+  const buf = await buildSettingsTemplate(model.newSemester({ name: 'x', start: '2026-03-01', end: '2026-07-31' }), {});
+  const r = await inspectTemplate(buf);
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.length);
 });

@@ -443,6 +443,51 @@ function createApi({ store, getWindow, getAutoLaunch, setAutoLaunch, isPortable 
     },
 
     // ----- 내보내기/인쇄 -----
+    // ----- 출석부 출력 양식 (학기별) -----
+    'registerTemplate.info': () => {
+      const s = sem();
+      const t = s.registerTemplate;
+      const exists = !!(t && t.file && fs.existsSync(t.file));
+      return { custom: exists, name: exists ? t.name : '', uploadedAt: exists ? t.uploadedAt : null, summary: exists ? t.summary : '', sheet: exists ? t.sheet : '', file: exists ? t.file : '', missing: !!(t && t.file && !exists) };
+    },
+    'registerTemplate.pick': async ({ file: given } = {}) => {
+      const s = sem();
+      let file = given;
+      if (!file) {
+        const r = await dialog.showOpenDialog(getWindow(), { title: '출석부 양식 엑셀 파일 선택', filters: [{ name: 'Excel', extensions: ['xlsx', 'xlsm'] }], properties: ['openFile'] });
+        if (r.canceled || !r.filePaths.length) return null;
+        file = r.filePaths[0];
+      }
+      const buf = fs.readFileSync(file);
+      const info = await exporter.inspectTemplate(buf);
+      if (!info.ok) throw new Error(`양식으로 쓸 수 없습니다. ${info.errors.join(' ')}`);
+      const dir = path.join(store.dataDir, '양식');
+      fs.mkdirSync(dir, { recursive: true });
+      const dest = path.join(dir, `출석부양식-${s.id}.xlsx`);
+      fs.writeFileSync(dest, buf);
+      s.registerTemplate = { file: dest, name: path.basename(file), sheet: info.sheet, summary: info.summary, uploadedAt: new Date().toISOString() };
+      save();
+      return { ...handlers['registerTemplate.info'](), sheets: info.sheets };
+    },
+    'registerTemplate.reset': () => {
+      const s = sem();
+      if (s.registerTemplate && s.registerTemplate.file) { try { fs.unlinkSync(s.registerTemplate.file); } catch { /* ignore */ } }
+      s.registerTemplate = null;
+      save();
+      return handlers['registerTemplate.info']();
+    },
+    'registerTemplate.download': async ({ file: given } = {}) => {
+      const s = sem();
+      const src = s.registerTemplate && s.registerTemplate.file && fs.existsSync(s.registerTemplate.file) ? s.registerTemplate.file : exporter.DEFAULT_TEMPLATE_PATH;
+      let file = given;
+      if (!file) {
+        const r = await dialog.showSaveDialog(getWindow(), { title: '현재 출석부 양식 저장', defaultPath: path.join(app.getPath('documents'), '출석부_양식.xlsx'), filters: [{ name: 'Excel', extensions: ['xlsx'] }] });
+        if (r.canceled || !r.filePath) return null;
+        file = r.filePath;
+      }
+      fs.copyFileSync(src, file);
+      return file;
+    },
     'export.precheck': () => exporter.exportPrecheck(sem(), { todayISO: today() }),
     'export.xlsx': async ({ subjectIds, file: given } = {}) => {
       const s = sem();
@@ -453,9 +498,10 @@ function createApi({ store, getWindow, getAutoLaunch, setAutoLaunch, isPortable 
         if (r.canceled || !r.filePath) return null;
         file = r.filePath;
       }
-      const { buffer, warnings, stats } = await exporter.buildRegisterWorkbook(s, { todayISO: today(), subjectIds: subjectIds && subjectIds.length ? subjectIds : null });
+      const tpl = s.registerTemplate && s.registerTemplate.file && fs.existsSync(s.registerTemplate.file) ? s.registerTemplate.file : exporter.DEFAULT_TEMPLATE_PATH;
+      const { buffer, warnings, stats, layout } = await exporter.buildRegisterWorkbook(s, { todayISO: today(), subjectIds: subjectIds && subjectIds.length ? subjectIds : null, templatePath: tpl });
       fs.writeFileSync(file, buffer);
-      return { file, warnings, stats };
+      return { file, warnings, stats, layout, customTemplate: tpl !== exporter.DEFAULT_TEMPLATE_PATH };
     },
     'print.pdf': async ({ landscape = true, defaultName = '출석부.pdf', file: given } = {}) => {
       const win = getWindow();
