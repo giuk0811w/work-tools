@@ -5,6 +5,6 @@
 
 | 앱 | 경로 | 설명 |
 |---|---|---|
-| 출석 확인 | [`attendance/index.html`](attendance/index.html) | 반·학생별 출석/지각/조퇴/결석 체크, 기간별 통계, CSV 내보내기, JSON 백업 |
+| 출석 확인 | [`attendance/index.html`](attendance/index.html) | 강원온라인학교 출석부 엑셀을 불러와 오늘 수업·수강생 명단을 보고 결석/출석인정결석(대기·확정) 체크 |
 
 각 앱은 설치 없이 HTML 파일을 브라우저로 열면 바로 사용할 수 있습니다. 데이터는 해당 브라우저(localStorage)에 저장됩니다.

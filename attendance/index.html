@@ -4,451 +4,491 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>출석 확인</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root {
-    --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #6b7280; --line: #e3e6eb;
-    --accent: #2f6fed; --present: #1f9d55; --late: #d98b00; --absent: #d64545; --early: #7c5cd6;
+    --bg: #f5f6f8; --card: #fff; --text: #1c2230; --muted: #6b7280; --line: #e2e5ea; --soft: #eef1f5;
+    --accent: #2f6fed; --accent-soft: #e6eefd;
+    --absent: #d64545; --absent-soft: #fdecec;
+    --pending: #c77c00; --pending-soft: #fff4de;
+    --excused: #1f8a5b; --excused-soft: #e3f5ec;
+    --live: #e0413a;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #14161b; --card: #1d2027; --text: #e6e8ec; --muted: #9aa1ad; --line: #2e323b;
-      --accent: #5b8ff5; --present: #3cc07a; --late: #f0a92a; --absent: #ef6b6b; --early: #a18af0;
+      --bg: #13151a; --card: #1c1f26; --text: #e6e8ec; --muted: #9aa1ad; --line: #2d313a; --soft: #252932;
+      --accent: #5b8ff5; --accent-soft: #1f2a42;
+      --absent: #ef6b6b; --absent-soft: #3a2224;
+      --pending: #f0a92a; --pending-soft: #3a2f1a;
+      --excused: #3cc07a; --excused-soft: #1a3328;
+      --live: #ff5c55;
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
          background: var(--bg); color: var(--text); font-size: 15px; }
-  header { padding: 16px; border-bottom: 1px solid var(--line); background: var(--card); }
-  header h1 { margin: 0 0 12px; font-size: 20px; }
-  nav { display: flex; gap: 6px; flex-wrap: wrap; }
-  nav button { border: 1px solid var(--line); background: transparent; color: var(--text);
-               padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 14px; }
-  nav button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-  main { max-width: 860px; margin: 0 auto; padding: 16px; }
-  section { display: none; }
-  section.active { display: block; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
-  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  label { font-size: 13px; color: var(--muted); }
-  input, select, textarea { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
-                            border-radius: 8px; padding: 8px 10px; }
-  textarea { width: 100%; min-height: 90px; }
-  button.btn { font: inherit; font-size: 14px; border: 1px solid var(--line); background: var(--card); color: var(--text);
-               border-radius: 8px; padding: 8px 12px; cursor: pointer; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button.danger { color: var(--absent); }
-  .summary { display: flex; gap: 12px; flex-wrap: wrap; font-size: 14px; margin: 12px 0 4px; }
-  .summary b { font-variant-numeric: tabular-nums; }
-  .list { list-style: none; margin: 0; padding: 0; }
-  .list li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid var(--line); }
-  .list li:first-child { border-top: 0; }
-  .name { flex: 1 1 120px; font-weight: 600; }
-  .status { display: flex; gap: 4px; }
-  .status button { font: inherit; font-size: 13px; padding: 6px 10px; border-radius: 8px; cursor: pointer;
-                   border: 1px solid var(--line); background: transparent; color: var(--muted); }
-  .status button.on[data-s="present"] { background: var(--present); border-color: var(--present); color: #fff; }
-  .status button.on[data-s="late"]    { background: var(--late);    border-color: var(--late);    color: #fff; }
-  .status button.on[data-s="absent"]  { background: var(--absent);  border-color: var(--absent);  color: #fff; }
-  .status button.on[data-s="early"]   { background: var(--early);   border-color: var(--early);   color: #fff; }
-  .note { flex: 1 1 100%; font-size: 13px; padding: 6px 8px; }
-  .empty { color: var(--muted); padding: 12px 0; }
-  .table-wrap { overflow-x: auto; }
-  table { border-collapse: collapse; width: 100%; font-size: 14px; }
-  th, td { border-bottom: 1px solid var(--line); padding: 8px; text-align: center; white-space: nowrap; }
-  th:first-child, td:first-child { text-align: left; }
-  td.rate { font-weight: 600; }
-  .hint { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+
+  /* 상단 */
+  header { background: var(--card); border-bottom: 1px solid var(--line); padding: 12px 16px; position: sticky; top: 0; z-index: 5; }
+  .top { display: flex; align-items: center; gap: 12px; max-width: 1100px; margin: 0 auto; flex-wrap: wrap; }
+  .top h1 { font-size: 18px; margin: 0; }
+  .datenav { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+  .datenav button { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 6px 10px; }
+  .datenav .today-btn { font-size: 13px; }
+  .datenav .date { font-weight: 700; min-width: 132px; text-align: center; font-variant-numeric: tabular-nums; }
+  .clock { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .menu-btn { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 6px 10px; }
+  .pending-badge { font-size: 12px; background: var(--pending-soft); color: var(--pending); border-radius: 999px; padding: 3px 10px; font-weight: 600; }
+
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+  @media (min-width: 860px) { main.has-data { grid-template-columns: 340px 1fr; align-items: start; } }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+  .section-title { font-size: 13px; color: var(--muted); font-weight: 600; margin: 0 0 8px 4px; }
+
+  /* 오늘 수업 목록 */
+  .classes { display: grid; gap: 8px; }
+  .class-card { text-align: left; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px;
+                display: grid; grid-template-columns: 64px 1fr; gap: 4px 12px; width: 100%; }
+  .class-card:hover { border-color: var(--accent); }
+  .class-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  .class-card.done { opacity: .72; }
+  .class-card .time { grid-row: span 2; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--muted); line-height: 1.35; }
+  .class-card .time b { display: block; font-size: 16px; color: var(--text); }
+  .class-card .name { font-weight: 700; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .class-card .meta { font-size: 13px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; }
+  .tag { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 2px 8px; }
+  .tag.live { background: var(--live); color: #fff; }
+  .tag.next { background: var(--accent-soft); color: var(--accent); }
+  .tag.done { background: var(--soft); color: var(--muted); }
+  .tag.notime { background: var(--soft); color: var(--muted); }
+  .mini { font-weight: 600; }
+  .mini.absent { color: var(--absent); } .mini.pending { color: var(--pending); } .mini.excused { color: var(--excused); }
+
+  .empty { padding: 28px 16px; text-align: center; color: var(--muted); }
+  .empty b { color: var(--text); display: block; margin-bottom: 6px; font-size: 16px; }
+
+  /* 명단 */
+  .roster-head { padding: 16px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-start; }
+  .roster-head h2 { margin: 0 0 4px; font-size: 18px; }
+  .roster-head .sub { color: var(--muted); font-size: 13px; }
+  .back { display: none; border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 6px 10px; }
+  .counts { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+  .count { font-size: 13px; border-radius: 8px; padding: 4px 10px; background: var(--soft); }
+  .count b { font-variant-numeric: tabular-nums; }
+  .count.absent { background: var(--absent-soft); color: var(--absent); }
+  .count.pending { background: var(--pending-soft); color: var(--pending); }
+  .count.excused { background: var(--excused-soft); color: var(--excused); }
+  .notice { margin: 12px 16px 0; font-size: 13px; background: var(--soft); border-radius: 10px; padding: 10px 12px; white-space: pre-line; color: var(--muted); }
+  .notice summary { cursor: pointer; font-weight: 600; color: var(--text); }
+  .hint { font-size: 13px; color: var(--muted); padding: 12px 16px 0; margin: 0; }
+
+  .students { list-style: none; margin: 0; padding: 8px 16px 16px; }
+  .student { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+  .student:first-child { border-top: 0; }
+  .student .no { width: 22px; text-align: right; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .student .who { flex: 1 1 140px; min-width: 0; }
+  .student .who b { display: block; }
+  .student .who span { font-size: 12px; color: var(--muted); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .seg button { border: 0; border-left: 1px solid var(--line); background: transparent; padding: 7px 10px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .seg button:first-child { border-left: 0; }
+  .seg button.on[data-s="present"] { background: var(--soft); color: var(--text); font-weight: 700; }
+  .seg button.on[data-s="absent"]  { background: var(--absent);  color: #fff; font-weight: 700; }
+  .seg button.on[data-s="pending"] { background: var(--pending); color: #fff; font-weight: 700; }
+  .seg button.on[data-s="excused"] { background: var(--excused); color: #fff; font-weight: 700; }
+  .student.marked { background: linear-gradient(90deg, var(--soft), transparent 60%); }
+
+  @media (max-width: 859px) {
+    main.has-data.show-roster .left { display: none; }
+    main.has-data:not(.show-roster) .right { display: none; }
+    .back { display: inline-block; }
+  }
+  @media (max-width: 520px) {
+    .seg { width: 100%; }
+    .seg button { flex: 1; padding: 8px 4px; font-size: 12px; }
+    .student .no { display: none; }
+  }
+
+  /* 시작 화면 / 메뉴 */
+  .welcome { max-width: 520px; margin: 40px auto; padding: 28px; text-align: center; }
+  .welcome h2 { margin: 0 0 8px; }
+  .welcome p { color: var(--muted); margin: 0 0 20px; line-height: 1.6; }
+  .primary { background: var(--accent); color: #fff; border: 0; border-radius: 10px; padding: 12px 18px; font-weight: 700; }
+  .menu { position: absolute; right: 16px; top: 56px; background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+          box-shadow: 0 8px 24px rgba(0,0,0,.12); padding: 6px; display: none; min-width: 220px; z-index: 10; }
+  .menu.open { display: block; }
+  .menu button { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 10px 12px; border-radius: 8px; }
+  .menu button:hover { background: var(--soft); }
+  .menu .danger { color: var(--absent); }
   .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--text); color: var(--bg);
-           padding: 10px 16px; border-radius: 8px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+           padding: 10px 16px; border-radius: 8px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 20; }
   .toast.show { opacity: 1; }
-  @media (min-width: 640px) { .note { flex: 1 1 180px; } }
 </style>
 </head>
 <body>
 <header>
-  <h1>출석 확인</h1>
-  <nav>
-    <button data-tab="check" class="active">출석 체크</button>
-    <button data-tab="stats">통계</button>
-    <button data-tab="manage">반·학생 관리</button>
-    <button data-tab="data">데이터</button>
-  </nav>
+  <div class="top">
+    <h1>출석 확인</h1>
+    <span class="clock" id="clock"></span>
+    <span class="pending-badge" id="pendingBadge" hidden></span>
+    <div class="datenav" id="datenav" hidden>
+      <button id="prevDay" aria-label="이전 날">‹</button>
+      <span class="date" id="dateLabel"></span>
+      <button id="nextDay" aria-label="다음 날">›</button>
+      <button class="today-btn" id="todayBtn">오늘</button>
+    </div>
+    <button class="menu-btn" id="menuBtn" aria-label="메뉴">☰</button>
+  </div>
+  <div class="menu" id="menu">
+    <button id="menuImport">출석부 엑셀 가져오기</button>
+    <button class="danger" id="menuReset">모든 데이터 지우기</button>
+  </div>
+  <input type="file" id="fileInput" accept=".xlsx,.xls" hidden>
 </header>
 
-<main>
-  <!-- 출석 체크 -->
-  <section id="check" class="active">
-    <div class="card">
-      <div class="row">
-        <label>반 <select id="checkClass"></select></label>
-        <label>날짜 <input type="date" id="checkDate"></label>
-        <button class="btn" id="allPresent">전원 출석</button>
-      </div>
-      <div class="summary" id="checkSummary"></div>
-    </div>
-    <div class="card"><ul class="list" id="checkList"></ul></div>
-  </section>
-
-  <!-- 통계 -->
-  <section id="stats">
-    <div class="card">
-      <div class="row">
-        <label>반 <select id="statsClass"></select></label>
-        <label>기간 <input type="date" id="statsFrom"></label>
-        <label>~ <input type="date" id="statsTo"></label>
-        <button class="btn" id="exportCsv">CSV 내보내기</button>
-      </div>
-      <p class="hint">출석률 = (출석 + 지각 + 조퇴) ÷ 기록된 수업일 수</p>
-    </div>
-    <div class="card table-wrap"><table id="statsTable"></table></div>
-  </section>
-
-  <!-- 반·학생 관리 -->
-  <section id="manage">
-    <div class="card">
-      <div class="row">
-        <input id="newClassName" placeholder="새 반 이름">
-        <button class="btn primary" id="addClass">반 추가</button>
-      </div>
-    </div>
-    <div class="card">
-      <div class="row">
-        <label>반 <select id="manageClass"></select></label>
-        <button class="btn" id="renameClass">이름 변경</button>
-        <button class="btn danger" id="deleteClass">반 삭제</button>
-      </div>
-      <p class="hint">학생 이름을 한 줄에 한 명씩 입력하세요. 엑셀에서 이름 열을 복사해 붙여넣어도 됩니다.</p>
-      <textarea id="bulkStudents" placeholder="홍길동&#10;김철수&#10;이영희"></textarea>
-      <div class="row" style="margin-top:8px"><button class="btn primary" id="addStudents">학생 추가</button></div>
-    </div>
-    <div class="card"><ul class="list" id="studentList"></ul></div>
-  </section>
-
-  <!-- 데이터 -->
-  <section id="data">
-    <div class="card">
-      <p style="margin-top:0">데이터는 이 브라우저에만 저장됩니다. 다른 기기로 옮기거나 백업하려면 파일로 내보내세요.</p>
-      <div class="row">
-        <button class="btn primary" id="backup">백업 파일 저장 (JSON)</button>
-        <label class="btn" style="color:var(--text)">백업 불러오기<input type="file" id="restore" accept="application/json" hidden></label>
-      </div>
-    </div>
-  </section>
-</main>
+<main id="main"></main>
 <div class="toast" id="toast"></div>
 
 <script>
-const STORE_KEY = 'attendance-app-v1';
+/* =========================================================
+   시간표 (2026학년도 2학기 PDF 기준)
+   key: 출석부 엑셀의 시트 이름. d: 요일(1=월 … 5=금), p: 교시
+   ========================================================= */
+const TIMETABLE = {
+  '경제':     [{ d: 4, p: 2, s: '10:00', e: '10:50' }, { d: 4, p: 3, s: '11:00', e: '11:50' }],
+  '심리학':   [{ d: 3, p: 5, s: '13:30', e: '14:20' }],
+  '기후변화': [{ d: 1, p: 8, s: '16:40', e: '17:30' }, { d: 2, p: 8, s: '16:40', e: '17:30' }, { d: 3, p: 8, s: '16:40', e: '17:30' }],
+  '금융경제': [{ d: 4, p: 8, s: '16:35', e: '17:25' }, { d: 4, p: 9, s: '17:25', e: '18:15' }, { d: 5, p: 8, s: '16:40', e: '17:30' }],
+};
+
 const STATUSES = [
   { key: 'present', label: '출석' },
-  { key: 'late',    label: '지각' },
-  { key: 'early',   label: '조퇴' },
   { key: 'absent',  label: '결석' },
+  { key: 'pending', label: '인정결석(대기)' },
+  { key: 'excused', label: '인정결석(확정)' },
 ];
-const LABEL = Object.fromEntries(STATUSES.map(s => [s.key, s.label]));
+const SHORT = { absent: '결석', pending: '인정대기', excused: '인정확정' };
+const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
+const STORE_KEY = 'attendance-v2';
 
-// data = { classes: [{id, name, students: [{id, name}]}], records: { "classId|YYYY-MM-DD": { studentId: {s, note} } } }
+/* data = {
+     importedAt, fileName,
+     courses: [{ id, title, credits, teacher, note, students: [{ id, seq, school, sid, name }], sessions: [{ no, date }] }],
+     marks: { "courseId|sessionNo|studentId": "absent" | "pending" | "excused" }   // 없으면 출석
+   } */
 let data = load();
+let viewDate;             // 'YYYY-MM-DD' (유틸 정의 뒤에 초기화)
+let selectedKey = null;   // "courseId|sessionNo"
 
 function load() {
-  try {
-    const raw = localStorage.getItem(STORE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) {}
-  return { classes: [], records: {} };
+  try { const raw = localStorage.getItem(STORE_KEY); if (raw) return JSON.parse(raw); } catch (e) {}
+  return null;
 }
 function save() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(data)); }
-  catch (e) { toast('저장에 실패했습니다. 백업 파일을 저장해 주세요.'); }
+  catch (e) { toast('저장에 실패했습니다.'); }
 }
 
+/* ---------- 유틸 ---------- */
 const $ = id => document.getElementById(id);
-const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
-const today = () => {
-  const d = new Date();
-  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-};
-const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const findClass = id => data.classes.find(c => c.id === id);
-
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const pad = n => String(n).padStart(2, '0');
+function todayStr(d = new Date()) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+function parseDate(s) { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); }
+function addDays(s, n) { const d = parseDate(s); d.setDate(d.getDate() + n); return todayStr(d); }
+function fmtDate(s) { const d = parseDate(s); return `${d.getMonth() + 1}월 ${d.getDate()}일 (${WEEK[d.getDay()]})`; }
+function nowMinutes() { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); }
+function toMin(hm) { const [h, m] = hm.split(':').map(Number); return h * 60 + m; }
 function toast(msg) {
-  const t = $('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => t.classList.remove('show'), 1800);
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove('show'), 2000);
 }
 
-// ---------- 탭 ----------
-document.querySelectorAll('nav button').forEach(btn => btn.addEventListener('click', () => {
-  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b === btn));
-  document.querySelectorAll('section').forEach(s => s.classList.toggle('active', s.id === btn.dataset.tab));
-  render();
-}));
-
-function fillClassSelect(sel) {
-  const prev = sel.value;
-  sel.innerHTML = data.classes.length
-    ? data.classes.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')
-    : '<option value="">(반 없음)</option>';
-  if (findClass(prev)) sel.value = prev;
+/* ---------- 해당 날짜의 수업 계산 ----------
+   출석부 엑셀의 차시 날짜를 기준으로, 같은 날 k번째 차시에 시간표의 k번째 시간을 붙인다. */
+function classesOn(date) {
+  if (!data) return [];
+  const dow = parseDate(date).getDay();
+  const list = [];
+  for (const c of data.courses) {
+    const todays = c.sessions.filter(s => s.date === date);
+    const slots = (TIMETABLE[c.id] || []).filter(t => t.d === dow).sort((a, b) => toMin(a.s) - toMin(b.s));
+    todays.forEach((s, i) => list.push({ course: c, session: s, slot: slots[i] || null }));
+  }
+  return list.sort((a, b) => (a.slot ? toMin(a.slot.s) : 9999) - (b.slot ? toMin(b.slot.s) : 9999));
 }
 
-// ---------- 출석 체크 ----------
-function recordKey() { return $('checkClass').value + '|' + $('checkDate').value; }
+function stateOf(item, date) {
+  if (!item.slot) return 'notime';
+  const today = todayStr();
+  if (date < today) return 'done';
+  if (date > today) return 'next';
+  const n = nowMinutes();
+  if (n < toMin(item.slot.s)) return 'next';
+  if (n <= toMin(item.slot.e)) return 'live';
+  return 'done';
+}
 
-function renderCheck() {
-  fillClassSelect($('checkClass'));
-  const cls = findClass($('checkClass').value);
-  const list = $('checkList');
-  if (!cls) {
-    list.innerHTML = '<li class="empty">먼저 "반·학생 관리"에서 반과 학생을 추가하세요.</li>';
-    $('checkSummary').innerHTML = '';
+function markOf(courseId, no, studentId) { return data.marks[`${courseId}|${no}|${studentId}`] || 'present'; }
+function setMark(courseId, no, studentId, status) {
+  const key = `${courseId}|${no}|${studentId}`;
+  if (status === 'present') delete data.marks[key]; else data.marks[key] = status;
+  save();
+}
+function tally(course, no) {
+  const t = { absent: 0, pending: 0, excused: 0 };
+  course.students.forEach(st => { const m = markOf(course.id, no, st.id); if (m !== 'present') t[m]++; });
+  return t;
+}
+
+/* 날짜 이동 시 가장 가까운 수업일 찾기 */
+function nearestClassDate(from, dir) {
+  const dates = [...new Set(data.courses.flatMap(c => c.sessions.map(s => s.date)))].sort();
+  return dir > 0 ? dates.find(d => d > from) : [...dates].reverse().find(d => d < from);
+}
+
+/* ---------- 렌더링 ---------- */
+function render() {
+  const main = $('main');
+  $('datenav').hidden = !data;
+  renderPendingBadge();
+  if (!data) {
+    main.className = '';
+    main.innerHTML = `<div class="card welcome">
+      <h2>출석부를 불러와 주세요</h2>
+      <p>강원온라인학교 출석부 엑셀 파일(.xlsx)을 선택하면<br>과목, 수강생 명단, 차시 날짜, 기존 출결이 자동으로 등록됩니다.<br>
+      데이터는 이 브라우저에만 저장됩니다.</p>
+      <button class="primary" id="welcomeImport">출석부 엑셀 선택</button>
+    </div>`;
+    $('welcomeImport').onclick = () => $('fileInput').click();
     return;
   }
-  if (!cls.students.length) {
-    list.innerHTML = '<li class="empty">이 반에 학생이 없습니다.</li>';
-    $('checkSummary').innerHTML = '';
+
+  $('dateLabel').textContent = fmtDate(viewDate);
+  $('todayBtn').disabled = viewDate === todayStr();
+  const items = classesOn(viewDate);
+  if (!items.some(i => key(i) === selectedKey)) selectedKey = defaultSelection(items);
+
+  main.className = 'has-data' + (main.classList.contains('show-roster') ? ' show-roster' : '');
+  main.innerHTML = `<div class="left">
+      <p class="section-title">${viewDate === todayStr() ? '오늘 수업' : '이 날의 수업'} ${items.length ? items.length + '개' : ''}</p>
+      <div class="classes" id="classList"></div>
+    </div>
+    <div class="right" id="roster"></div>`;
+
+  const listEl = $('classList');
+  if (!items.length) {
+    const next = nearestClassDate(viewDate, 1);
+    listEl.innerHTML = `<div class="card empty"><b>수업이 없는 날입니다</b>
+      ${next ? `다음 수업: <a href="#" id="gotoNext">${fmtDate(next)}</a>` : ''}</div>`;
+    if (next) $('gotoNext').onclick = e => { e.preventDefault(); viewDate = next; render(); };
+    $('roster').innerHTML = '';
+    main.classList.remove('show-roster');
     return;
   }
-  const rec = data.records[recordKey()] || {};
-  list.innerHTML = cls.students.map(st => {
-    const r = rec[st.id] || {};
-    return `<li data-id="${st.id}">
-      <span class="name">${esc(st.name)}</span>
-      <span class="status">${STATUSES.map(s =>
-        `<button data-s="${s.key}" class="${r.s === s.key ? 'on' : ''}">${s.label}</button>`).join('')}</span>
-      <input class="note" placeholder="메모 (사유 등)" value="${esc(r.note || '')}">
-    </li>`;
+
+  listEl.innerHTML = items.map(item => {
+    const st = stateOf(item, viewDate);
+    const t = tally(item.course, item.session.no);
+    const tag = { live: '<span class="tag live">진행 중</span>', next: viewDate === todayStr() ? '<span class="tag next">예정</span>' : '',
+                  done: '', notime: '<span class="tag notime">시간 미정</span>' }[st];
+    const marks = ['absent', 'pending', 'excused'].filter(k => t[k]).map(k => `<span class="mini ${k}">${SHORT[k]} ${t[k]}</span>`).join('');
+    return `<button class="class-card ${st === 'done' ? 'done' : ''} ${key(item) === selectedKey ? 'selected' : ''}" data-key="${key(item)}">
+      <span class="time">${item.slot ? `<b>${item.slot.s}</b>~${item.slot.e}<br>${item.slot.p}교시` : '<b>--:--</b>'}</span>
+      <span class="name">${esc(item.course.title)} ${tag}</span>
+      <span class="meta"><span>${item.session.no}차시</span><span>수강생 ${item.course.students.length}명</span>${marks || '<span>전원 출석</span>'}</span>
+    </button>`;
   }).join('');
-  renderSummary(cls, rec);
-}
 
-function renderSummary(cls, rec) {
-  const counts = { present: 0, late: 0, early: 0, absent: 0 };
-  let unmarked = 0;
-  cls.students.forEach(st => { const s = rec[st.id]?.s; s ? counts[s]++ : unmarked++; });
-  $('checkSummary').innerHTML =
-    STATUSES.map(s => `<span>${s.label} <b>${counts[s.key]}</b></span>`).join('') +
-    `<span style="color:var(--muted)">미체크 <b>${unmarked}</b></span>`;
-}
-
-function setRecord(studentId, patch) {
-  const key = recordKey();
-  const rec = data.records[key] = data.records[key] || {};
-  const r = rec[studentId] = { ...rec[studentId], ...patch };
-  if (!r.s && !r.note) delete rec[studentId];
-  if (!Object.keys(rec).length) delete data.records[key];
-  save();
-}
-
-$('checkList').addEventListener('click', e => {
-  const btn = e.target.closest('.status button');
-  if (!btn) return;
-  const id = btn.closest('li').dataset.id;
-  const cur = data.records[recordKey()]?.[id]?.s;
-  setRecord(id, { s: cur === btn.dataset.s ? undefined : btn.dataset.s });
-  renderCheck();
-});
-$('checkList').addEventListener('change', e => {
-  if (!e.target.classList.contains('note')) return;
-  setRecord(e.target.closest('li').dataset.id, { note: e.target.value.trim() || undefined });
-});
-$('checkClass').addEventListener('change', renderCheck);
-$('checkDate').addEventListener('change', renderCheck);
-$('allPresent').addEventListener('click', () => {
-  const cls = findClass($('checkClass').value);
-  if (!cls) return;
-  const rec = data.records[recordKey()] || {};
-  cls.students.forEach(st => { if (!rec[st.id]?.s) setRecord(st.id, { s: 'present' }); });
-  renderCheck();
-  toast('미체크 학생을 모두 출석 처리했습니다.');
-});
-
-// ---------- 통계 ----------
-function computeStats() {
-  const cls = findClass($('statsClass').value);
-  if (!cls) return null;
-  const from = $('statsFrom').value, to = $('statsTo').value;
-  const days = Object.keys(data.records)
-    .filter(k => k.startsWith(cls.id + '|'))
-    .map(k => k.slice(cls.id.length + 1))
-    .filter(d => (!from || d >= from) && (!to || d <= to))
-    .sort();
-  const rows = cls.students.map(st => {
-    const c = { present: 0, late: 0, early: 0, absent: 0 };
-    days.forEach(d => { const s = data.records[cls.id + '|' + d][st.id]?.s; if (s) c[s]++; });
-    const total = c.present + c.late + c.early + c.absent;
-    const rate = total ? Math.round((total - c.absent) / total * 1000) / 10 : null;
-    return { name: st.name, ...c, total, rate };
+  listEl.querySelectorAll('.class-card').forEach(b => b.onclick = () => {
+    selectedKey = b.dataset.key;
+    main.classList.add('show-roster');
+    render();
+    window.scrollTo(0, 0);
   });
-  return { cls, days, rows };
+
+  renderRoster(items.find(i => key(i) === selectedKey));
 }
 
-function renderStats() {
-  fillClassSelect($('statsClass'));
-  const st = computeStats();
-  const table = $('statsTable');
-  if (!st) { table.innerHTML = '<tr><td class="empty">반이 없습니다.</td></tr>'; return; }
-  table.innerHTML =
-    `<tr><th>이름</th>${STATUSES.map(s => `<th>${s.label}</th>`).join('')}<th>출석률</th></tr>` +
-    (st.rows.length ? st.rows.map(r => `<tr><td>${esc(r.name)}</td>${STATUSES.map(s => `<td>${r[s.key]}</td>`).join('')}
-      <td class="rate">${r.rate === null ? '-' : r.rate + '%'}</td></tr>`).join('')
-      : '<tr><td class="empty" colspan="6">학생이 없습니다.</td></tr>') +
-    `<tr><td colspan="6" style="color:var(--muted);text-align:left">기록된 수업일 ${st.days.length}일</td></tr>`;
+function key(item) { return `${item.course.id}|${item.session.no}`; }
+function defaultSelection(items) {
+  if (!items.length) return null;
+  const pick = items.find(i => stateOf(i, viewDate) === 'live')
+            || items.find(i => stateOf(i, viewDate) === 'next')
+            || items[items.length - 1];
+  return key(pick);
 }
-['statsClass', 'statsFrom', 'statsTo'].forEach(id => $(id).addEventListener('change', renderStats));
 
-function download(name, content, type) {
-  const url = URL.createObjectURL(new Blob([content], { type }));
-  const a = Object.assign(document.createElement('a'), { href: url, download: name });
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-const csvCell = v => /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
+function renderRoster(item) {
+  const el = $('roster');
+  if (!item) { el.innerHTML = ''; return; }
+  const { course, session, slot } = item;
+  const t = tally(course, session.no);
+  const present = course.students.length - t.absent - t.pending - t.excused;
+  el.innerHTML = `<div class="card">
+    <div class="roster-head">
+      <button class="back" id="backBtn">‹ 목록</button>
+      <div>
+        <h2>${esc(course.title)}</h2>
+        <div class="sub">${fmtDate(session.date)} · ${session.no}차시${slot ? ` · ${slot.p}교시 ${slot.s}~${slot.e}` : ''} · ${esc(course.teacher)}</div>
+      </div>
+      <div class="counts">
+        <span class="count">출석 <b>${present}</b></span>
+        <span class="count absent">결석 <b>${t.absent}</b></span>
+        <span class="count pending">인정대기 <b>${t.pending}</b></span>
+        <span class="count excused">인정확정 <b>${t.excused}</b></span>
+      </div>
+    </div>
+    ${course.note ? `<details class="notice"><summary>소속교 학사일정 메모</summary>${esc(course.note)}</details>` : ''}
+    <p class="hint">따로 체크하지 않은 학생은 출석으로 처리됩니다. 인정결석은 소속교 공문 접수 전이면 <b>대기</b>, 접수 후 <b>확정</b>으로 표시하세요.</p>
+    <ul class="students">
+      ${course.students.map(st => {
+        const m = markOf(course.id, session.no, st.id);
+        return `<li class="student ${m !== 'present' ? 'marked' : ''}" data-id="${st.id}">
+          <span class="no">${st.seq}</span>
+          <span class="who"><b>${esc(st.name)}</b><span>${esc(st.school)}${st.sid ? ' · ' + esc(st.sid) : ''}</span></span>
+          <span class="seg">${STATUSES.map(s => `<button data-s="${s.key}" class="${m === s.key ? 'on' : ''}">${s.label}</button>`).join('')}</span>
+        </li>`;
+      }).join('')}
+    </ul>
+  </div>`;
 
-$('exportCsv').addEventListener('click', () => {
-  const st = computeStats();
-  if (!st) return;
-  // 날짜별 상세 + 합계
-  const header = ['이름', ...st.days, ...STATUSES.map(s => s.label), '출석률'];
-  const lines = [header];
-  st.cls.students.forEach((stu, i) => {
-    const r = st.rows[i];
-    lines.push([
-      stu.name,
-      ...st.days.map(d => {
-        const x = data.records[st.cls.id + '|' + d][stu.id];
-        return x ? (LABEL[x.s] || '') + (x.note ? ` (${x.note})` : '') : '';
-      }),
-      ...STATUSES.map(s => r[s.key]),
-      r.rate === null ? '' : r.rate + '%',
-    ]);
+  $('backBtn').onclick = () => { $('main').classList.remove('show-roster'); render(); };
+  el.querySelectorAll('.seg button').forEach(b => b.onclick = () => {
+    setMark(course.id, session.no, b.closest('li').dataset.id, b.dataset.s);
+    render();
   });
-  const csv = '﻿' + lines.map(l => l.map(csvCell).join(',')).join('\r\n'); // BOM: 엑셀 한글 깨짐 방지
-  download(`출석_${st.cls.name}_${today()}.csv`, csv, 'text/csv;charset=utf-8');
-});
-
-// ---------- 반·학생 관리 ----------
-function renderManage() {
-  fillClassSelect($('manageClass'));
-  const cls = findClass($('manageClass').value);
-  const list = $('studentList');
-  if (!cls) { list.innerHTML = '<li class="empty">반을 먼저 추가하세요.</li>'; return; }
-  list.innerHTML = cls.students.length
-    ? cls.students.map((st, i) => `<li data-id="${st.id}">
-        <span class="name">${i + 1}. ${esc(st.name)}</span>
-        <button class="btn" data-act="up">↑</button>
-        <button class="btn" data-act="rename">이름 변경</button>
-        <button class="btn danger" data-act="delete">삭제</button>
-      </li>`).join('')
-    : '<li class="empty">학생이 없습니다.</li>';
 }
 
-$('addClass').addEventListener('click', () => {
-  const name = $('newClassName').value.trim();
-  if (!name) return;
-  const cls = { id: uid(), name, students: [] };
-  data.classes.push(cls);
-  save();
-  $('newClassName').value = '';
-  renderManage();
-  $('manageClass').value = cls.id;
-  renderManage();
-  toast(`"${name}" 반을 추가했습니다.`);
-});
-$('newClassName').addEventListener('keydown', e => { if (e.key === 'Enter') $('addClass').click(); });
-$('manageClass').addEventListener('change', renderManage);
+function renderPendingBadge() {
+  const n = data ? Object.values(data.marks).filter(v => v === 'pending').length : 0;
+  const b = $('pendingBadge');
+  b.hidden = !n;
+  b.textContent = `공문 대기 ${n}건`;
+}
 
-$('renameClass').addEventListener('click', () => {
-  const cls = findClass($('manageClass').value);
-  if (!cls) return;
-  const name = prompt('새 반 이름', cls.name);
-  if (name && name.trim()) { cls.name = name.trim(); save(); renderManage(); }
-});
-$('deleteClass').addEventListener('click', () => {
-  const cls = findClass($('manageClass').value);
-  if (!cls || !confirm(`"${cls.name}" 반과 모든 출석 기록을 삭제할까요?`)) return;
-  data.classes = data.classes.filter(c => c !== cls);
-  Object.keys(data.records).forEach(k => { if (k.startsWith(cls.id + '|')) delete data.records[k]; });
-  save();
-  renderManage();
-});
+function tick() {
+  const d = new Date();
+  $('clock').textContent = `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
-$('addStudents').addEventListener('click', () => {
-  const cls = findClass($('manageClass').value);
-  if (!cls) { toast('반을 먼저 추가하세요.'); return; }
-  const names = $('bulkStudents').value.split(/\r?\n/).map(s => s.split('\t')[0].trim()).filter(Boolean);
-  if (!names.length) return;
-  names.forEach(name => cls.students.push({ id: uid(), name }));
-  save();
-  $('bulkStudents').value = '';
-  renderManage();
-  toast(`${names.length}명을 추가했습니다.`);
-});
+/* ---------- 출석부 엑셀 가져오기 ----------
+   시트 = 과목. 페이지마다 '연번' 머리글 행, 바로 아래 행에 차시 날짜(F~V열), 그 아래 학생 행.
+   차시 날짜는 앞 차시보다 이른 날짜가 나오면(양식에 남은 옛 날짜) 거기서 멈춘다.
+   기존 기호: X/x → 결석, ◎ → 인정결석(확정). 그 외 기호는 무시. */
+function importWorkbook(buf, fileName) {
+  const wb = XLSX.read(buf, { type: 'array' });
+  const courses = [];
+  const marks = {};
+  const warnings = [];
 
-$('studentList').addEventListener('click', e => {
-  const btn = e.target.closest('button[data-act]');
-  if (!btn) return;
-  const cls = findClass($('manageClass').value);
-  const idx = cls.students.findIndex(s => s.id === btn.closest('li').dataset.id);
-  const st = cls.students[idx];
-  if (btn.dataset.act === 'up' && idx > 0) {
-    [cls.students[idx - 1], cls.students[idx]] = [cls.students[idx], cls.students[idx - 1]];
-  } else if (btn.dataset.act === 'rename') {
-    const name = prompt('새 이름', st.name);
-    if (!name || !name.trim()) return;
-    st.name = name.trim();
-  } else if (btn.dataset.act === 'delete') {
-    if (!confirm(`"${st.name}" 학생을 삭제할까요? (출석 기록도 삭제됩니다)`)) return;
-    cls.students.splice(idx, 1);
-    Object.keys(data.records).forEach(k => {
-      if (!k.startsWith(cls.id + '|')) return;
-      delete data.records[k][st.id];
-      if (!Object.keys(data.records[k]).length) delete data.records[k];
-    });
-  } else return;
-  save();
-  renderManage();
-});
+  for (const sheetName of wb.SheetNames) {
+    if (sheetName === '양식') continue;
+    const ws = wb.Sheets[sheetName];
+    if (!ws['!ref']) continue;
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    const cell = (r, c) => { const x = ws[XLSX.utils.encode_cell({ r, c })]; return x && x.t !== 'e' ? x.v : null; };
+    const str = (r, c) => { const v = cell(r, c); return v == null ? '' : String(v).trim(); };
 
-// ---------- 데이터 ----------
-$('backup').addEventListener('click', () => {
-  download(`출석_백업_${today()}.json`, JSON.stringify(data, null, 2), 'application/json');
-});
-$('restore').addEventListener('change', async e => {
+    const headers = [];
+    let info = null;
+    for (let r = range.s.r; r <= range.e.r; r++) {
+      if (str(r, 1) === '연번') headers.push(r);
+      if (!info && str(r, 1) === '수업') info = { title: str(r + 1, 1), credits: str(r + 1, 3), teacher: str(r + 1, 5) };
+    }
+    if (!headers.length || !info) continue;
+
+    // 학생 (1페이지)
+    const students = [];
+    for (let r = headers[0] + 2; r <= range.e.r; r++) {
+      if (typeof cell(r, 1) !== 'number') break;
+      const name = str(r, 4);
+      if (!name) continue;
+      students.push({ id: 's' + (students.length + 1), seq: students.length + 1, school: str(r, 2), sid: str(r, 3), name });
+    }
+
+    // 차시
+    const sessions = [];
+    let last = '', stop = false;
+    for (const h of headers) {
+      if (stop) break;
+      for (let c = 5; c <= 21; c++) {
+        const v = cell(h + 1, c);
+        if (typeof v !== 'number' || v < 40000) continue;
+        const d = XLSX.SSF.parse_date_code(v);
+        const date = `${d.y}-${pad(d.m)}-${pad(d.d)}`;
+        if (date < last) { stop = true; break; }
+        last = date;
+        const no = sessions.length + 1;
+        sessions.push({ no, date });
+        // 이 페이지의 학생 행에서 기호 읽기 (이름으로 매칭)
+        for (let r = h + 2; r <= range.e.r; r++) {
+          if (typeof cell(r, 1) !== 'number') break;
+          const st = students.find(s => s.name === str(r, 4));
+          if (!st) continue;
+          const m = str(r, c);
+          if (m === 'X' || m === 'x') marks[`${sheetName}|${no}|${st.id}`] = 'absent';
+          else if (m === '◎') marks[`${sheetName}|${no}|${st.id}`] = 'excused';
+        }
+      }
+    }
+
+    courses.push({ id: sheetName, title: info.title, credits: info.credits, teacher: info.teacher,
+                   note: str(headers[0] + 1, 23), students, sessions });
+    if (!TIMETABLE[sheetName]) warnings.push(sheetName);
+  }
+
+  // 수업명이 겹치면(예: 자산관리 시트의 수업명이 '사회문화') 시트 이름으로 구분
+  courses.forEach(c => {
+    if (courses.filter(o => o.title === c.title).length > 1) c.title = c.id.replace(/\(.*\)/, '');
+  });
+
+  if (!courses.length) throw new Error('출석부 형식의 시트를 찾지 못했습니다.');
+  data = { importedAt: new Date().toISOString(), fileName, courses, marks };
+  save();
+  return { courses, warnings };
+}
+
+/* ---------- 이벤트 ---------- */
+$('fileInput').addEventListener('change', async e => {
   const file = e.target.files[0];
   e.target.value = '';
   if (!file) return;
+  if (data && !confirm('기존 데이터를 새 출석부로 교체할까요?')) return;
   try {
-    const parsed = JSON.parse(await file.text());
-    if (!Array.isArray(parsed.classes) || typeof parsed.records !== 'object') throw new Error();
-    if (!confirm('현재 데이터를 백업 파일 내용으로 덮어쓸까요?')) return;
-    data = parsed;
-    save();
+    const { courses, warnings } = importWorkbook(await file.arrayBuffer(), file.name);
+    const students = courses.reduce((n, c) => n + c.students.length, 0);
+    toast(`${courses.length}개 과목, 수강생 ${students}명을 불러왔습니다.` + (warnings.length ? ` (시간표 없음: ${warnings.join(', ')})` : ''));
+    viewDate = todayStr(); selectedKey = null;
     render();
-    toast('백업을 불러왔습니다.');
-  } catch {
-    toast('올바른 백업 파일이 아닙니다.');
+  } catch (err) {
+    toast(err.message || '파일을 읽지 못했습니다.');
   }
 });
 
-// ---------- 초기화 ----------
-function render() {
-  const tab = document.querySelector('nav button.active').dataset.tab;
-  if (tab === 'check') renderCheck();
-  if (tab === 'stats') renderStats();
-  if (tab === 'manage') renderManage();
-}
-
-$('checkDate').value = today();
-$('statsTo').value = today();
-$('statsFrom').value = today().slice(0, 8) + '01';
-if (!data.classes.length) {
-  document.querySelector('nav button[data-tab="manage"]').click();
-} else {
+$('menuBtn').onclick = e => { e.stopPropagation(); $('menu').classList.toggle('open'); };
+document.addEventListener('click', () => $('menu').classList.remove('open'));
+$('menuImport').onclick = () => $('fileInput').click();
+$('menuReset').onclick = () => {
+  if (!confirm('모든 과목과 출결 기록을 지울까요? 되돌릴 수 없습니다.')) return;
+  data = null;
+  try { localStorage.removeItem(STORE_KEY); } catch (e) {}
   render();
-}
+};
+$('prevDay').onclick = () => { viewDate = addDays(viewDate, -1); selectedKey = null; $('main').classList.remove('show-roster'); render(); };
+$('nextDay').onclick = () => { viewDate = addDays(viewDate, 1); selectedKey = null; $('main').classList.remove('show-roster'); render(); };
+$('todayBtn').onclick = () => { viewDate = todayStr(); selectedKey = null; render(); };
+
+viewDate = todayStr();
+tick();
+render();
+setInterval(() => {
+  tick();
+  if (data && viewDate === todayStr() && !document.querySelector('.menu.open')) render(); // 진행 중 표시 갱신
+}, 60000);
 </script>
 </body>
 </html>
