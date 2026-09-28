@@ -77,6 +77,22 @@
   .sess-tools button { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 6px 12px; font-size: 14px; }
   .sess-tools button.primary { border: 0; background: var(--accent); color: #fff; font-weight: 700; }
   .sess-tools button:disabled { opacity: .5; cursor: default; }
+  .tt { padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  .tt-head { display: flex; gap: 8px; align-items: baseline; margin-bottom: 6px; }
+  .tt-head .sub { font-size: 13px; color: var(--muted); }
+  .tt-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .tt-list li { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 14px; }
+  @media (max-width: 520px) {
+    .tt-list li { display: grid; grid-template-columns: auto auto 1fr; grid-template-areas: "d p del" "s s s"; padding: 8px 0; border-top: 1px solid var(--line); }
+    .tt-list li:first-child { border-top: 0; }
+    .tt-list [data-f=d] { grid-area: d; } .tt-list label { grid-area: p; } .tt-list [data-act=tt-del] { grid-area: del; justify-self: end; }
+    .tt-list .tt-time { grid-area: s; }
+  }
+  .tt-time { display: flex; gap: 6px; align-items: center; }
+  .tt-list select, .tt-list input { font: inherit; font-size: 14px; color: var(--text); background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 5px 6px; }
+  .tt-list input[type=number] { width: 48px; margin-right: 2px; }
+  .tt-list label { display: flex; align-items: center; color: var(--muted); }
+  .tt-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
   .sess-list { list-style: none; margin: 0; padding: 4px 16px 12px; }
   .sess-list li { display: grid; grid-template-columns: 56px 150px 1fr auto; gap: 8px; align-items: center; padding: 7px 0; border-top: 1px solid var(--line); font-size: 14px; }
   .sess-list li:first-child { border-top: 0; }
@@ -276,7 +292,15 @@ function parseDate(s) { const [y, m, d] = s.split('-').map(Number); return new D
 function addDays(s, n) { const d = parseDate(s); d.setDate(d.getDate() + n); return todayStr(d); }
 function fmtDate(s) { const d = parseDate(s); return `${d.getMonth() + 1}월 ${d.getDate()}일 (${WEEK[d.getDay()]})`; }
 function nowMinutes() { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); }
-function toMin(hm) { const [h, m] = hm.split(':').map(Number); return h * 60 + m; }
+function toMin(hm) { if (!hm) return 9999; const [h, m] = hm.split(':').map(Number); return h * 60 + m; }
+
+/* 과목 시간표: 앱에서 입력한 값(data.timetable)이 있으면 그것을, 없으면 코드의 기본 시간표를 쓴다.
+   slot = { d: 요일(1=월), p: 교시(없으면 null), s: 시작 'HH:MM'(없으면 ''), e: 종료 } */
+function getSlots(cid) { return (data && data.timetable && data.timetable[cid]) || TIMETABLE[cid] || []; }
+function slotLabel(slot) {
+  if (!slot) return '';
+  return [slot.p ? slot.p + '교시' : '', slot.s ? `${slot.s}~${slot.e}` : '시간 미정'].filter(Boolean).join(' ');
+}
 function toast(msg) {
   const t = $('toast'); t.textContent = msg; t.classList.add('show');
   clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove('show'), 2000);
@@ -290,14 +314,14 @@ function classesOn(date) {
   const list = [];
   for (const c of data.courses) {
     const todays = c.sessions.filter(s => s.date === date);
-    const slots = (TIMETABLE[c.id] || []).filter(t => t.d === dow).sort((a, b) => toMin(a.s) - toMin(b.s));
+    const slots = getSlots(c.id).filter(t => t.d === dow).sort((a, b) => toMin(a.s) - toMin(b.s) || (a.p || 0) - (b.p || 0));
     todays.forEach((s, i) => list.push({ course: c, session: s, slot: slots[i] || null }));
   }
   return list.sort((a, b) => (a.slot ? toMin(a.slot.s) : 9999) - (b.slot ? toMin(b.slot.s) : 9999));
 }
 
 function stateOf(item, date) {
-  if (!item.slot) return 'notime';
+  if (!item.slot || !item.slot.s) return 'notime';
   const today = todayStr();
   if (date < today) return 'done';
   if (date > today) return 'next';
@@ -379,7 +403,7 @@ function render() {
                   done: '', notime: '<span class="tag notime">시간 미정</span>' }[st];
     const marks = ['absent', 'pending', 'excused'].filter(k => t[k]).map(k => `<span class="mini ${k}">${SHORT[k]} ${t[k]}</span>`).join('');
     return `<button class="class-card ${st === 'done' ? 'done' : ''} ${key(item) === selectedKey ? 'selected' : ''}" data-key="${key(item)}">
-      <span class="time">${item.slot ? `<b>${item.slot.s}</b>~${item.slot.e}<br>${item.slot.p}교시` : '<b>--:--</b>'}</span>
+      <span class="time">${item.slot?.s ? `<b>${item.slot.s}</b>~${item.slot.e}` : '<b>--:--</b>'}${item.slot?.p ? `<br>${item.slot.p}교시` : ''}</span>
       <span class="name">${esc(item.course.title)} ${tag}</span>
       <span class="meta"><span>${item.session.no}차시</span><span>수강생 ${item.course.students.length}명</span>${marks || '<span>전원 출석</span>'}</span>
     </button>`;
@@ -415,7 +439,7 @@ function renderRoster(item) {
       <button class="back" id="backBtn">‹ 목록</button>
       <div>
         <h2>${esc(course.title)}</h2>
-        <div class="sub">${fmtDate(session.date)} · ${session.no}차시${slot ? ` · ${slot.p}교시 ${slot.s}~${slot.e}` : ''} · ${esc(course.teacher)}</div>
+        <div class="sub">${fmtDate(session.date)} · ${session.no}차시${slot ? ' · ' + slotLabel(slot) : ''} · ${esc(course.teacher)}</div>
       </div>
       <div class="counts">
         <span class="count">출석 <b>${present}</b></span>
@@ -464,7 +488,7 @@ function shortDate(s) { const d = parseDate(s); return `${d.getMonth() + 1}/${d.
 // 같은 날 k번째 차시 → 그 요일 시간표의 k번째 시간
 function slotsOn(course, date) {
   const dow = parseDate(date).getDay();
-  return (TIMETABLE[course.id] || []).filter(t => t.d === dow).sort((a, b) => toMin(a.s) - toMin(b.s));
+  return getSlots(course.id).filter(t => t.d === dow).sort((a, b) => toMin(a.s) - toMin(b.s) || (a.p || 0) - (b.p || 0));
 }
 function slotFor(course, session) {
   const idx = course.sessions.filter(s => s.date === session.date && s.no < session.no).length;
@@ -509,7 +533,9 @@ function renderSessions() {
   if (!data.courses.some(c => c.id === sessCourse)) sessCourse = data.courses[0]?.id;
   const course = data.courses.find(c => c.id === sessCourse);
   const today = todayStr();
-  const perWeek = (TIMETABLE[course.id] || []).length;
+  const slots = getSlots(course.id);
+  const perWeek = slots.length;
+  const custom = !!data.timetable?.[course.id];
   const cap = course.capacity || null;
   const marksOf = no => {
     const t = tally(course, no);
@@ -524,6 +550,25 @@ function renderSessions() {
       <div class="doc-head">
         <b>${esc(course.title)}</b>
         <span class="sub">총 ${course.sessions.length}차시${cap ? ` · 출석부 양식 ${cap}칸` : ''}${perWeek ? ` · 주 ${perWeek}차시` : ' · 시간표 없음'}</span>
+      </div>
+      <div class="tt">
+        <div class="tt-head"><b>수업 시간표</b>
+          <span class="sub">${custom ? '직접 입력한 시간표' : TIMETABLE[course.id] ? '기본 시간표 (PDF)' : '시간표 없음'}</span></div>
+        <ul class="tt-list">
+          ${slots.map((t, i) => `<li data-i="${i}">
+            <select data-f="d" aria-label="요일">${[1, 2, 3, 4, 5, 6].map(d => `<option value="${d}" ${t.d === d ? 'selected' : ''}>${WEEK[d]}요일</option>`).join('')}</select>
+            <label><input type="number" data-f="p" min="1" max="12" value="${t.p || ''}" placeholder="-">교시</label>
+            <span class="tt-time"><input type="time" data-f="s" value="${t.s || ''}" aria-label="시작 시간">
+            <span>~</span>
+            <input type="time" data-f="e" value="${t.e || ''}" aria-label="종료 시간"></span>
+            <button class="link-btn" data-act="tt-del">삭제</button>
+          </li>`).join('')}
+        </ul>
+        <div class="tt-actions">
+          <button class="link-btn" id="ttAdd">+ 시간 추가</button>
+          ${course.sessions.length ? '<button class="link-btn" id="ttGuess">기존 차시 날짜로 요일 채우기</button>' : ''}
+          ${custom && TIMETABLE[course.id] ? '<button class="link-btn" id="ttReset">기본 시간표로 되돌리기</button>' : ''}
+        </div>
       </div>
       <div class="sess-tools">
         <input type="number" id="autoCount" min="1" max="60" value="${perWeek || 1}" ${perWeek ? '' : 'disabled'}>
@@ -544,7 +589,7 @@ function renderSessions() {
           return `<li class="${cls}" data-no="${s.no}">
             <span class="no">${s.no}차시</span>
             <input type="date" value="${s.date}" aria-label="${s.no}차시 날짜">
-            <span class="desc">${WEEK[parseDate(s.date).getDay()]}요일${slot ? ` · ${slot.p}교시 ${slot.s}` : ''} ${warn}${over}${marksOf(s.no)}</span>
+            <span class="desc">${WEEK[parseDate(s.date).getDay()]}요일${slot ? ' · ' + slotLabel(slot) : ''} ${warn}${over}${marksOf(s.no)}</span>
             <button class="link-btn" data-act="del">삭제</button>
           </li>`;
         }).join('')}
@@ -553,6 +598,54 @@ function renderSessions() {
   </div>`;
 
   main.querySelectorAll('.subtabs button').forEach(b => b.onclick = () => { sessCourse = b.dataset.cid; sessScroll = true; render(); });
+
+  // 시간표 편집: 바꾸는 즉시 이 과목의 직접 입력 시간표로 저장
+  const saveSlots = list => {
+    data.timetable = data.timetable || {};
+    data.timetable[course.id] = list.sort((a, b) => a.d - b.d || toMin(a.s) - toMin(b.s) || (a.p || 0) - (b.p || 0));
+    save();
+    render();
+  };
+  const editable = () => slots.map(t => ({ ...t }));
+  main.querySelectorAll('.tt-list [data-f]').forEach(inp => inp.onchange = () => {
+    const list = editable();
+    const t = list[Number(inp.closest('li').dataset.i)];
+    const f = inp.dataset.f;
+    if (f === 'd') t.d = Number(inp.value);
+    if (f === 'p') t.p = inp.value ? Number(inp.value) : null;
+    if (f === 's') {
+      t.s = inp.value;
+      if (inp.value && (!t.e || toMin(t.e) <= toMin(inp.value))) {   // 종료 시간이 비었으면 50분 수업으로 채움
+        const m = toMin(inp.value) + 50;
+        t.e = `${pad(Math.floor(m / 60) % 24)}:${pad(m % 60)}`;
+      }
+    }
+    if (f === 'e') t.e = inp.value;
+    saveSlots(list);
+  });
+  main.querySelectorAll('.tt-list button[data-act=tt-del]').forEach(b => b.onclick = () => {
+    saveSlots(editable().filter((_, i) => i !== Number(b.closest('li').dataset.i)));
+  });
+  $('ttAdd').onclick = () => {
+    const last = slots.at(-1);
+    saveSlots([...editable(), { d: last ? last.d : 1, p: null, s: '', e: '' }]);
+  };
+  if ($('ttGuess')) $('ttGuess').onclick = () => {
+    // 요일별로 하루에 가장 많이 들어간 차시 수만큼 칸을 만든다 (시간은 비워 둠)
+    const perDay = {};
+    course.sessions.forEach(x => { perDay[x.date] = (perDay[x.date] || 0) + 1; });
+    const perDow = {};
+    Object.entries(perDay).forEach(([d, n]) => { const w = parseDate(d).getDay(); perDow[w] = Math.max(perDow[w] || 0, n); });
+    const guessed = Object.entries(perDow).flatMap(([w, n]) => Array.from({ length: n }, () => ({ d: Number(w), p: null, s: '', e: '' })));
+    if (slots.length && !confirm('지금 시간표를 기존 차시 날짜로 추정한 요일로 바꿀까요?')) return;
+    saveSlots(guessed);
+    toast(`요일을 채웠습니다: ${Object.entries(perDow).map(([w, n]) => `${WEEK[w]} ${n}차시`).join(', ')}. 시간을 입력하세요.`);
+  };
+  if ($('ttReset')) $('ttReset').onclick = () => {
+    delete data.timetable[course.id];
+    save();
+    render();
+  };
   $('autoAdd').onclick = () => {
     const n = Math.max(1, Math.min(60, Number($('autoCount').value) || 1));
     const dates = autoDates(course, n);
@@ -766,7 +859,7 @@ function importWorkbook(buf, fileName) {
     courses.push({ id: sheetName, title: sc.info.title, credits: sc.info.credits, teacher: sc.info.teacher,
                    note: sc.note, students: sc.students, sessions: sc.sessions.map(({ no, date }) => ({ no, date })),
                    capacity: sc.pages.length * PER_PAGE });
-    if (!TIMETABLE[sheetName]) warnings.push(sheetName);
+    if (!getSlots(sheetName).length) warnings.push(sheetName);
   }
 
   // 수업명이 겹치면(예: 자산관리 시트의 수업명이 '사회문화') 시트 이름으로 구분
@@ -777,7 +870,8 @@ function importWorkbook(buf, fileName) {
   if (!courses.length) throw new Error('출석부 형식의 시트를 찾지 못했습니다.');
   const docs = {};
   Object.entries(marks).forEach(([k, v]) => { if (v === 'excused') docs[k] = { received: null, memo: '출석부 엑셀에서 가져옴' }; });
-  data = { importedAt: new Date().toISOString(), fileName, courses, marks, docs };
+  const timetable = data?.timetable || {};   // 직접 입력한 시간표는 다시 가져와도 유지
+  data = { importedAt: new Date().toISOString(), fileName, courses, marks, docs, timetable };
   save();
   saveTemplate(buf, fileName);
   return { courses, warnings };
@@ -972,7 +1066,7 @@ $('fileInput').addEventListener('change', async e => {
   try {
     const { courses, warnings } = importWorkbook(await file.arrayBuffer(), file.name);
     const students = courses.reduce((n, c) => n + c.students.length, 0);
-    toast(`${courses.length}개 과목, 수강생 ${students}명을 불러왔습니다.` + (warnings.length ? ` (시간표 없음: ${warnings.join(', ')})` : ''));
+    toast(`${courses.length}개 과목, 수강생 ${students}명을 불러왔습니다.` + (warnings.length ? ` 시간표가 없는 과목(${warnings.join(', ')})은 「차시 관리」에서 입력하세요.` : ''));
     viewDate = todayStr(); selectedKey = null; view = 'classes';
     render();
   } catch (err) {
