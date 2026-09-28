@@ -177,10 +177,12 @@
     <button class="menu-btn" id="menuBtn" aria-label="메뉴">☰</button>
   </div>
   <div class="menu" id="menu">
+    <button id="menuExport">출석부 엑셀 내보내기</button>
     <button id="menuImport">출석부 엑셀 가져오기</button>
     <button class="danger" id="menuReset">모든 데이터 지우기</button>
   </div>
   <input type="file" id="fileInput" accept=".xlsx,.xls" hidden>
+  <input type="file" id="templateInput" accept=".xlsx" hidden>
 </header>
 
 <main id="main"></main>
@@ -207,6 +209,7 @@ const STATUSES = [
 const SHORT = { absent: '결석', pending: '인정대기', excused: '인정확정' };
 const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
 const STORE_KEY = 'attendance-v2';
+const TEMPLATE_KEY = 'attendance-template';
 
 /* data = {
      importedAt, fileName,
@@ -518,69 +521,80 @@ function tick() {
   $('clock').textContent = `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/* ---------- 출석부 엑셀 가져오기 ----------
+/* ---------- 출석부 엑셀 구조 읽기 ----------
    시트 = 과목. 페이지마다 '연번' 머리글 행, 바로 아래 행에 차시 날짜(F~V열), 그 아래 학생 행.
    차시 날짜는 앞 차시보다 이른 날짜가 나오면(양식에 남은 옛 날짜) 거기서 멈춘다.
-   기존 기호: X/x → 결석, ◎ → 인정결석(확정). 그 외 기호는 무시. */
+   가져오기와 내보내기가 같은 규칙을 써야 차시 번호와 셀 위치가 일치한다. */
+function scanSheet(ws) {
+  if (!ws['!ref']) return null;
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const cell = (r, c) => { const x = ws[XLSX.utils.encode_cell({ r, c })]; return x && x.t !== 'e' ? x.v : null; };
+  const str = (r, c) => { const v = cell(r, c); return v == null ? '' : String(v).trim(); };
+
+  const headers = [];
+  let info = null;
+  for (let r = range.s.r; r <= range.e.r; r++) {
+    if (str(r, 1) === '연번') headers.push(r);
+    if (!info && str(r, 1) === '수업') info = { title: str(r + 1, 1), credits: str(r + 1, 3), teacher: str(r + 1, 5) };
+  }
+  if (!headers.length || !info) return null;
+
+  // 페이지별 학생 행 (이름은 2페이지부터 수식 결과값)
+  const pages = headers.map(h => {
+    const rows = [];
+    for (let r = h + 2; r <= range.e.r; r++) {
+      if (typeof cell(r, 1) !== 'number') break;
+      const name = str(r, 4);
+      if (name) rows.push({ r, name });
+    }
+    return { h, rows };
+  });
+
+  const students = pages[0].rows.map((x, i) => ({ id: 's' + (i + 1), seq: i + 1, school: str(x.r, 2), sid: str(x.r, 3), name: x.name }));
+
+  const sessions = [];
+  let last = '';
+  outer:
+  for (let p = 0; p < pages.length; p++) {
+    for (let c = 5; c <= 21; c++) {
+      const v = cell(pages[p].h + 1, c);
+      if (typeof v !== 'number' || v < 40000) continue;
+      const d = XLSX.SSF.parse_date_code(v);
+      const date = `${d.y}-${pad(d.m)}-${pad(d.d)}`;
+      if (date < last) break outer;
+      last = date;
+      sessions.push({ no: sessions.length + 1, date, page: p, col: c });
+    }
+  }
+  const yellow = (r, c) => {
+    const st = ws[XLSX.utils.encode_cell({ r, c })]?.s;
+    return !!st && st.patternType === 'solid' && /^(FF)?FFFF00$/i.test(st.fgColor?.rgb || '');
+  };
+  return { info, pages, students, sessions, str, yellow, note: str(headers[0] + 1, 23) };
+}
+
+/* 기존 기호: X/x → 결석, ◎ → 인정결석(확정), 노란 배경 ◎ → 인정결석(대기). 그 외 기호는 무시(내보낼 때도 건드리지 않음). */
 function importWorkbook(buf, fileName) {
-  const wb = XLSX.read(buf, { type: 'array' });
+  const wb = XLSX.read(buf, { type: 'array', cellStyles: true });
   const courses = [];
   const marks = {};
   const warnings = [];
 
   for (const sheetName of wb.SheetNames) {
     if (sheetName === '양식') continue;
-    const ws = wb.Sheets[sheetName];
-    if (!ws['!ref']) continue;
-    const range = XLSX.utils.decode_range(ws['!ref']);
-    const cell = (r, c) => { const x = ws[XLSX.utils.encode_cell({ r, c })]; return x && x.t !== 'e' ? x.v : null; };
-    const str = (r, c) => { const v = cell(r, c); return v == null ? '' : String(v).trim(); };
-
-    const headers = [];
-    let info = null;
-    for (let r = range.s.r; r <= range.e.r; r++) {
-      if (str(r, 1) === '연번') headers.push(r);
-      if (!info && str(r, 1) === '수업') info = { title: str(r + 1, 1), credits: str(r + 1, 3), teacher: str(r + 1, 5) };
-    }
-    if (!headers.length || !info) continue;
-
-    // 학생 (1페이지)
-    const students = [];
-    for (let r = headers[0] + 2; r <= range.e.r; r++) {
-      if (typeof cell(r, 1) !== 'number') break;
-      const name = str(r, 4);
-      if (!name) continue;
-      students.push({ id: 's' + (students.length + 1), seq: students.length + 1, school: str(r, 2), sid: str(r, 3), name });
-    }
-
-    // 차시
-    const sessions = [];
-    let last = '', stop = false;
-    for (const h of headers) {
-      if (stop) break;
-      for (let c = 5; c <= 21; c++) {
-        const v = cell(h + 1, c);
-        if (typeof v !== 'number' || v < 40000) continue;
-        const d = XLSX.SSF.parse_date_code(v);
-        const date = `${d.y}-${pad(d.m)}-${pad(d.d)}`;
-        if (date < last) { stop = true; break; }
-        last = date;
-        const no = sessions.length + 1;
-        sessions.push({ no, date });
-        // 이 페이지의 학생 행에서 기호 읽기 (이름으로 매칭)
-        for (let r = h + 2; r <= range.e.r; r++) {
-          if (typeof cell(r, 1) !== 'number') break;
-          const st = students.find(s => s.name === str(r, 4));
-          if (!st) continue;
-          const m = str(r, c);
-          if (m === 'X' || m === 'x') marks[`${sheetName}|${no}|${st.id}`] = 'absent';
-          else if (m === '◎') marks[`${sheetName}|${no}|${st.id}`] = 'excused';
-        }
+    const sc = scanSheet(wb.Sheets[sheetName]);
+    if (!sc) continue;
+    for (const s of sc.sessions) {
+      for (const row of sc.pages[s.page].rows) {
+        const st = sc.students.find(x => x.name === row.name);
+        if (!st) continue;
+        const m = sc.str(row.r, s.col);
+        if (m === 'X' || m === 'x') marks[`${sheetName}|${s.no}|${st.id}`] = 'absent';
+        else if (m === '◎') marks[`${sheetName}|${s.no}|${st.id}`] = sc.yellow(row.r, s.col) ? 'pending' : 'excused';
       }
     }
-
-    courses.push({ id: sheetName, title: info.title, credits: info.credits, teacher: info.teacher,
-                   note: str(headers[0] + 1, 23), students, sessions });
+    courses.push({ id: sheetName, title: sc.info.title, credits: sc.info.credits, teacher: sc.info.teacher,
+                   note: sc.note, students: sc.students, sessions: sc.sessions.map(({ no, date }) => ({ no, date })) });
     if (!TIMETABLE[sheetName]) warnings.push(sheetName);
   }
 
@@ -594,7 +608,175 @@ function importWorkbook(buf, fileName) {
   Object.entries(marks).forEach(([k, v]) => { if (v === 'excused') docs[k] = { received: null, memo: '출석부 엑셀에서 가져옴' }; });
   data = { importedAt: new Date().toISOString(), fileName, courses, marks, docs };
   save();
+  saveTemplate(buf, fileName);
   return { courses, warnings };
+}
+
+/* ---------- 원본 양식 보관 ----------
+   내보내기는 가져온 원본 파일을 양식으로 삼아 출결 칸만 바꾼다. */
+function saveTemplate(buf, fileName) {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  try { localStorage.setItem(TEMPLATE_KEY, JSON.stringify({ fileName, b64: btoa(bin) })); return true; }
+  catch (e) { return false; }
+}
+function loadTemplate() {
+  try {
+    const t = JSON.parse(localStorage.getItem(TEMPLATE_KEY));
+    const bin = atob(t.b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return { fileName: t.fileName, buf: bytes.buffer };
+  } catch (e) { return null; }
+}
+
+/* ---------- 출석부 엑셀 내보내기 ----------
+   xlsx(zip) 안의 시트 XML에서 출결 칸의 값과 채우기만 바꾼다. 서식·수식·인쇄 설정·그림은 원본 그대로.
+   결석 X / 인정결석(확정) ◎ / 인정결석(대기) ◎ + 노란 배경 / 출석 빈칸 */
+const NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+const NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const XML_HEAD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n';
+const EXPORT_SYMBOL = { absent: 'X', pending: '◎', excused: '◎', present: null };
+
+function loadScript(src) {
+  return new Promise((ok, fail) => {
+    const s = Object.assign(document.createElement('script'), { src, onload: ok, onerror: () => fail(new Error('라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인하세요.')) });
+    document.head.appendChild(s);
+  });
+}
+
+async function exportWorkbook(template) {
+  if (!window.JSZip) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js');
+  const wb = XLSX.read(template, { type: 'array' });
+  const zip = await JSZip.loadAsync(template);
+  const parse = async path => new DOMParser().parseFromString(await zip.file(path).async('string'), 'application/xml');
+  const write = (path, doc) => zip.file(path, XML_HEAD + new XMLSerializer().serializeToString(doc).replace(/^<\?xml[^>]*\?>\s*/, ''), { createFolders: false });
+
+  // 시트 이름 → 시트 XML 경로
+  const wbDoc = await parse('xl/workbook.xml');
+  const rels = await parse('xl/_rels/workbook.xml.rels');
+  const target = {};
+  for (const r of rels.getElementsByTagName('Relationship')) target[r.getAttribute('Id')] = r.getAttribute('Target');
+  const sheetPath = {};
+  for (const s of wbDoc.getElementsByTagNameNS(NS, 'sheet')) {
+    const t = target[s.getAttributeNS(NS_R, 'id')];
+    sheetPath[s.getAttribute('name')] = t.startsWith('/') ? t.slice(1) : 'xl/' + t;
+  }
+
+  // 스타일: 기존 칸 스타일을 복제해 채우기만 바꾼다
+  const styles = await parse('xl/styles.xml');
+  const fillsEl = styles.getElementsByTagNameNS(NS, 'fills')[0];
+  const xfsEl = styles.getElementsByTagNameNS(NS, 'cellXfs')[0];
+  const fills = [...fillsEl.getElementsByTagNameNS(NS, 'fill')];
+  const isYellow = f => {
+    const p = f.getElementsByTagNameNS(NS, 'patternFill')[0];
+    const fg = p && p.getElementsByTagNameNS(NS, 'fgColor')[0];
+    return p && p.getAttribute('patternType') === 'solid' && fg && (fg.getAttribute('rgb') || '').toUpperCase() === 'FFFFFF00';
+  };
+  let yellowId = fills.findIndex(isYellow);
+  if (yellowId < 0) {
+    const f = new DOMParser().parseFromString(`<fill xmlns="${NS}"><patternFill patternType="solid"><fgColor rgb="FFFFFF00"/><bgColor indexed="64"/></patternFill></fill>`, 'application/xml').documentElement;
+    fillsEl.appendChild(styles.importNode(f, true));
+    yellowId = fills.length;
+    fillsEl.setAttribute('count', yellowId + 1);
+  }
+  const xfCache = {};
+  function styleFor(s, yellow) {
+    const xfs = xfsEl.getElementsByTagNameNS(NS, 'xf');
+    const xf = xfs[s] || xfs[0];
+    const cur = Number(xf.getAttribute('fillId') || 0);
+    const want = yellow ? yellowId : (cur === yellowId ? 0 : cur);
+    if (want === cur) return s;
+    const ck = s + ':' + want;
+    if (xfCache[ck] == null) {
+      const clone = xf.cloneNode(true);
+      clone.setAttribute('fillId', want);
+      clone.setAttribute('applyFill', '1');
+      xfsEl.appendChild(clone);
+      xfCache[ck] = xfs.length - 1;
+      xfsEl.setAttribute('count', xfs.length);
+    }
+    return xfCache[ck];
+  }
+
+  let written = 0;
+  for (const course of data.courses) {
+    const path = sheetPath[course.id];
+    const sc = path && scanSheet(wb.Sheets[course.id]);
+    if (!sc) continue;
+    const doc = await parse(path);
+    const sheetData = doc.getElementsByTagNameNS(NS, 'sheetData')[0];
+    const rowEls = {};
+    for (const r of sheetData.getElementsByTagNameNS(NS, 'row')) rowEls[r.getAttribute('r')] = r;
+
+    for (const s of sc.sessions) {
+      for (const row of sc.pages[s.page].rows) {
+        const st = course.students.find(x => x.name === row.name);
+        if (!st) continue;
+        const m = markOf(course.id, s.no, st.id);
+        const cur = sc.str(row.r, s.col);
+        if (m === 'present' && !['', 'X', 'x', '◎'].includes(cur)) continue;  // '확' 같은 메모 기호는 그대로 둔다
+        setCell(doc, sheetData, rowEls, row.r + 1, s.col, EXPORT_SYMBOL[m], m === 'pending', styleFor);
+        written++;
+      }
+    }
+    write(path, doc);
+  }
+  write('xl/styles.xml', styles);
+  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  return { blob, written };
+}
+
+function setCell(doc, sheetData, rowEls, r1, c0, text, yellow, styleFor) {
+  const ref = XLSX.utils.encode_col(c0) + r1;
+  let row = rowEls[r1];
+  if (!row) {
+    row = doc.createElementNS(NS, 'row');
+    row.setAttribute('r', r1);
+    const after = [...sheetData.getElementsByTagNameNS(NS, 'row')].find(x => Number(x.getAttribute('r')) > r1);
+    sheetData.insertBefore(row, after || null);
+    rowEls[r1] = row;
+  }
+  let c = [...row.getElementsByTagNameNS(NS, 'c')].find(x => x.getAttribute('r') === ref);
+  if (!c) {
+    c = doc.createElementNS(NS, 'c');
+    c.setAttribute('r', ref);
+    const after = [...row.getElementsByTagNameNS(NS, 'c')].find(x => XLSX.utils.decode_cell(x.getAttribute('r')).c > c0);
+    row.insertBefore(c, after || null);
+  }
+  while (c.firstChild) c.removeChild(c.firstChild);
+  c.removeAttribute('t');
+  c.setAttribute('s', styleFor(Number(c.getAttribute('s') || 0), yellow));
+  if (text) {
+    c.setAttribute('t', 'inlineStr');
+    const is = doc.createElementNS(NS, 'is');
+    const t = doc.createElementNS(NS, 't');
+    t.textContent = text;
+    is.appendChild(t);
+    c.appendChild(is);
+  }
+}
+
+function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement('a'), { href: url, download: name });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+async function runExport(template) {
+  try {
+    toast('엑셀 파일을 만드는 중…');
+    const { blob } = await exportWorkbook(template.buf);
+    const base = (template.fileName || '출석부.xlsx').replace(/\.xlsx?$/i, '');
+    downloadBlob(blob, `${base}_${todayStr().replace(/-/g, '')}.xlsx`);
+    const n = Object.values(data.marks).filter(v => v === 'pending').length;
+    toast('출석부를 내보냈습니다.' + (n ? ` 공문 대기 ${n}건은 노란 배경 ◎로 표시됩니다.` : ''));
+  } catch (err) {
+    console.error(err);
+    toast(err.message || '내보내기에 실패했습니다.');
+  }
 }
 
 /* ---------- 이벤트 ---------- */
@@ -617,6 +799,20 @@ $('fileInput').addEventListener('change', async e => {
 $('menuBtn').onclick = e => { e.stopPropagation(); $('menu').classList.toggle('open'); };
 document.addEventListener('click', () => $('menu').classList.remove('open'));
 $('menuImport').onclick = () => $('fileInput').click();
+$('menuExport').onclick = () => {
+  if (!data) { toast('먼저 출석부를 불러오세요.'); return; }
+  const t = loadTemplate();
+  if (t) runExport(t);
+  else { toast('양식으로 쓸 원본 출석부 파일을 선택하세요.'); $('templateInput').click(); }
+};
+$('templateInput').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  const buf = await file.arrayBuffer();
+  saveTemplate(buf, file.name);
+  runExport({ fileName: file.name, buf });
+});
 document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
   view = b.dataset.view;
   if (view === 'docs') docsTab = 'pending';
@@ -626,7 +822,7 @@ document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
 $('menuReset').onclick = () => {
   if (!confirm('모든 과목과 출결 기록을 지울까요? 되돌릴 수 없습니다.')) return;
   data = null;
-  try { localStorage.removeItem(STORE_KEY); } catch (e) {}
+  try { localStorage.removeItem(STORE_KEY); localStorage.removeItem(TEMPLATE_KEY); } catch (e) {}
   render();
 };
 $('prevDay').onclick = () => { viewDate = addDays(viewDate, -1); selectedKey = null; $('main').classList.remove('show-roster'); render(); };
