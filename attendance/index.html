@@ -193,6 +193,12 @@
   .menu button { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 10px 12px; border-radius: 8px; }
   .menu button:hover { background: var(--soft); }
   .menu .danger { color: var(--absent); }
+  .menu hr { border: 0; border-top: 1px solid var(--line); margin: 6px 4px; }
+  .menu-note { margin: 0; padding: 2px 12px 6px; font-size: 12px; color: var(--muted); }
+  .menu-note.due { color: var(--pending); font-weight: 600; }
+  .menu-btn { position: relative; }
+  .menu-btn.due::after { content: ''; position: absolute; top: 3px; right: 3px; width: 8px; height: 8px; border-radius: 50%; background: var(--pending); }
+  .secondary { background: transparent; color: var(--accent); border: 1px solid var(--line); border-radius: 10px; padding: 12px 18px; font-weight: 600; margin-left: 6px; }
   .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--text); color: var(--bg);
            padding: 10px 16px; border-radius: 8px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 20; }
   .toast.show { opacity: 1; }
@@ -220,10 +226,16 @@
     <button id="menuExport">출석부 엑셀 내보내기</button>
     <button id="menuImport">출석부 엑셀 가져오기</button>
     <button id="menuTemplate">내보내기 양식 파일 바꾸기</button>
+    <hr>
+    <button id="menuBackup">백업 파일 저장</button>
+    <button id="menuRestore">백업 파일로 복원</button>
+    <p class="menu-note" id="backupNote"></p>
+    <hr>
     <button class="danger" id="menuReset">모든 데이터 지우기</button>
   </div>
   <input type="file" id="fileInput" accept=".xlsx,.xls" hidden>
   <input type="file" id="templateInput" accept=".xlsx" hidden>
+  <input type="file" id="restoreInput" accept=".json,application/json" hidden>
 </header>
 
 <main id="main"></main>
@@ -278,7 +290,9 @@ function load() {
   try { const raw = localStorage.getItem(STORE_KEY); if (raw) return JSON.parse(raw); } catch (e) {}
   return null;
 }
-function save() {
+function save(touch = true) {
+  if (touch) data.changedAt = new Date().toISOString();
+  renderBackupNote();
   try { localStorage.setItem(STORE_KEY, JSON.stringify(data)); }
   catch (e) { toast('저장에 실패했습니다.'); }
 }
@@ -356,6 +370,7 @@ function render() {
   const main = $('main');
   $('datenav').hidden = !data || view !== 'classes';
   $('tabs').hidden = !data;
+  renderBackupNote();
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.view === view));
   renderPendingBadge();
   if (!data) {
@@ -363,10 +378,12 @@ function render() {
     main.innerHTML = `<div class="card welcome">
       <h2>출석부를 불러와 주세요</h2>
       <p>강원온라인학교 출석부 엑셀 파일(.xlsx)을 선택하면<br>과목, 수강생 명단, 차시 날짜, 기존 출결이 자동으로 등록됩니다.<br>
-      데이터는 이 브라우저에만 저장됩니다.</p>
+      데이터는 이 브라우저에만 저장됩니다.<br>다른 PC에서 쓰던 데이터는 백업 파일로 복원하세요.</p>
       <button class="primary" id="welcomeImport">출석부 엑셀 선택</button>
+      <button class="secondary" id="welcomeRestore">백업 파일로 복원</button>
     </div>`;
     $('welcomeImport').onclick = () => $('fileInput').click();
+    $('welcomeRestore').onclick = () => $('restoreInput').click();
     return;
   }
 
@@ -1102,6 +1119,71 @@ document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
   window.scrollTo(0, 0);
   render();
 });
+/* ---------- 백업 ----------
+   출결·공문·차시·시간표와 내보내기 양식(원본 엑셀)을 JSON 파일 하나로 저장한다.
+   다른 PC나 브라우저에서 「백업 파일로 복원」하면 그대로 이어서 쓸 수 있다. */
+const BACKUP_DUE_DAYS = 7;
+function backupDue() {
+  if (!data || !data.changedAt) return false;
+  if (!data.lastBackupAt) return true;
+  return data.changedAt > data.lastBackupAt && (Date.now() - new Date(data.lastBackupAt)) / 864e5 >= BACKUP_DUE_DAYS;
+}
+function renderBackupNote() {
+  const note = $('backupNote');
+  if (!note) return;
+  const due = backupDue();
+  if (!data) note.textContent = '';
+  else if (!data.lastBackupAt) note.textContent = '아직 백업한 적이 없습니다.';
+  else {
+    const d = new Date(data.lastBackupAt);
+    const days = Math.floor((Date.now() - d) / 864e5);
+    note.textContent = `마지막 백업: ${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}` + (days ? ` (${days}일 전)` : '')
+      + (data.changedAt > data.lastBackupAt ? ' · 이후 변경 있음' : '');
+  }
+  note.classList.toggle('due', due);
+  $('menuBtn').classList.toggle('due', due);
+}
+
+$('menuBackup').onclick = () => {
+  if (!data) { toast('백업할 데이터가 없습니다.'); return; }
+  let template = null;
+  try { template = JSON.parse(localStorage.getItem(TEMPLATE_KEY)); } catch (e) {}
+  data.lastBackupAt = new Date().toISOString();
+  save(false);
+  const payload = { app: 'attendance', version: 1, savedAt: data.lastBackupAt, data, template };
+  const d = new Date();
+  downloadBlob(new Blob([JSON.stringify(payload)], { type: 'application/json' }),
+    `출석확인_백업_${todayStr(d).replace(/-/g, '')}_${pad(d.getHours())}${pad(d.getMinutes())}.json`);
+  toast('백업 파일을 저장했습니다. 학생 개인정보가 들어 있으니 안전한 곳에 보관하세요.');
+};
+$('menuRestore').onclick = () => $('restoreInput').click();
+$('restoreInput').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  let payload;
+  try { payload = JSON.parse(await file.text()); } catch (err) { payload = null; }
+  if (!payload || payload.app !== 'attendance' || !Array.isArray(payload.data?.courses)) {
+    toast('출석 확인 앱의 백업 파일이 아닙니다.');
+    return;
+  }
+  const when = new Date(payload.savedAt);
+  const info = `${when.getMonth() + 1}/${when.getDate()} ${pad(when.getHours())}:${pad(when.getMinutes())}에 저장한 백업 (${payload.data.courses.length}개 과목)`;
+  if (data && !confirm(`${info}으로 복원할까요?\n지금 이 브라우저의 데이터는 백업 내용으로 바뀝니다.`)) return;
+  data = payload.data;
+  data.marks = data.marks || {};
+  data.docs = data.docs || {};
+  data.timetable = data.timetable || {};
+  save(false);
+  try {
+    if (payload.template) localStorage.setItem(TEMPLATE_KEY, JSON.stringify(payload.template));
+    else localStorage.removeItem(TEMPLATE_KEY);
+  } catch (err) { toast('양식 파일을 저장하지 못했습니다. 내보낼 때 원본 출석부를 다시 선택하세요.'); }
+  view = 'classes'; viewDate = todayStr(); selectedKey = null;
+  render();
+  toast(`${info}을 복원했습니다.`);
+});
+
 $('menuReset').onclick = () => {
   if (!confirm('모든 과목과 출결 기록을 지울까요? 되돌릴 수 없습니다.')) return;
   data = null;
@@ -1113,6 +1195,7 @@ $('nextDay').onclick = () => { viewDate = addDays(viewDate, 1); selectedKey = nu
 $('todayBtn').onclick = () => { viewDate = todayStr(); selectedKey = null; render(); };
 
 viewDate = todayStr();
+renderBackupNote();
 tick();
 render();
 setInterval(() => {
