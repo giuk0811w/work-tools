@@ -70,6 +70,29 @@
   .doc-foot input { font: inherit; font-size: 14px; color: var(--text); background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
   .doc-foot input.memo { flex: 1 1 180px; }
   .doc-foot .primary { padding: 8px 14px; margin-left: auto; }
+  .sess-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 12px 16px; background: var(--soft); }
+  .sess-tools input { font: inherit; font-size: 14px; color: var(--text); background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  .sess-tools input[type=number] { width: 64px; }
+  .sess-tools .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
+  .sess-tools button { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 6px 12px; font-size: 14px; }
+  .sess-tools button.primary { border: 0; background: var(--accent); color: #fff; font-weight: 700; }
+  .sess-tools button:disabled { opacity: .5; cursor: default; }
+  .sess-list { list-style: none; margin: 0; padding: 4px 16px 12px; }
+  .sess-list li { display: grid; grid-template-columns: 56px 150px 1fr auto; gap: 8px; align-items: center; padding: 7px 0; border-top: 1px solid var(--line); font-size: 14px; }
+  .sess-list li:first-child { border-top: 0; }
+  .sess-list li.past { color: var(--muted); }
+  .sess-list li.today { background: var(--accent-soft); border-radius: 8px; }
+  .sess-list li.page-break { border-top: 2px dashed var(--line); }
+  .sess-list .no { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; padding-right: 4px; white-space: nowrap; }
+  .sess-list input[type=date] { font: inherit; font-size: 14px; color: inherit; background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 3px 4px; width: 100%; }
+  .sess-list input[type=date]:hover, .sess-list input[type=date]:focus { border-color: var(--line); background: var(--card); }
+  .sess-list .desc { font-size: 13px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; }
+  .sess-list .warn { color: var(--absent); font-weight: 600; }
+  @media (max-width: 520px) {
+    .sess-list li { grid-template-columns: 52px 1fr auto; }
+    .sess-list .no { font-size: 13px; }
+    .sess-list .desc { grid-column: 2 / 3; }
+  }
   .student .who .doc-info { display: block; font-size: 12px; color: var(--excused); }
   .student .who .doc-info.pending { color: var(--pending); }
 
@@ -167,6 +190,7 @@
     <nav class="tabs" id="tabs" hidden>
       <button data-view="classes" class="active">수업</button>
       <button data-view="docs">인정결석 공문 <span class="pill" id="pendingPill" hidden></span></button>
+      <button data-view="sessions">차시 관리</button>
     </nav>
     <div class="datenav" id="datenav" hidden>
       <button id="prevDay" aria-label="이전 날">‹</button>
@@ -179,6 +203,7 @@
   <div class="menu" id="menu">
     <button id="menuExport">출석부 엑셀 내보내기</button>
     <button id="menuImport">출석부 엑셀 가져오기</button>
+    <button id="menuTemplate">내보내기 양식 파일 바꾸기</button>
     <button class="danger" id="menuReset">모든 데이터 지우기</button>
   </div>
   <input type="file" id="fileInput" accept=".xlsx,.xls" hidden>
@@ -209,6 +234,13 @@ const STATUSES = [
 const SHORT = { absent: '결석', pending: '인정대기', excused: '인정확정' };
 const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
 const STORE_KEY = 'attendance-v2';
+const FIRST_COL = 5, PER_PAGE = 17;   // 출석부 양식: F열부터 한 페이지에 17차시
+/* 공휴일 (시간표대로 차시를 자동 추가할 때 건너뜀). 학교 행사일은 추가 후 직접 삭제 */
+const HOLIDAYS = {
+  '2026-09-24': '추석', '2026-09-25': '추석', '2026-09-26': '추석', '2026-10-03': '개천절', '2026-10-05': '대체공휴일',
+  '2026-10-09': '한글날', '2026-12-25': '성탄절',
+  '2027-01-01': '신정', '2027-02-06': '설날', '2027-02-07': '설날', '2027-02-08': '설날', '2027-02-09': '대체공휴일',
+};
 const TEMPLATE_KEY = 'attendance-template';
 
 /* data = {
@@ -222,6 +254,8 @@ let viewDate;             // 'YYYY-MM-DD' (유틸 정의 뒤에 초기화)
 let selectedKey = null;   // "courseId|sessionNo"
 let view = 'classes';     // 'classes' | 'docs'
 let docsTab = 'pending';  // 'pending' | 'excused'
+let sessCourse = null;    // 차시 관리에서 고른 과목 id
+let sessScroll = false;
 if (data) data.docs = data.docs || {};
 
 function load() {
@@ -313,6 +347,7 @@ function render() {
   }
 
   if (view === 'docs') { renderDocs(); return; }
+  if (view === 'sessions') { renderSessions(); return; }
 
   $('dateLabel').textContent = fmtDate(viewDate);
   $('todayBtn').disabled = viewDate === todayStr();
@@ -424,6 +459,140 @@ function docInfoLine(k, m) {
   return `<span class="doc-info">${d.received ? '공문 ' + shortDate(d.received) + ' 접수' : '공문 접수(날짜 미기록)'}${d.memo ? ' · ' + esc(d.memo) : ''}</span>`;
 }
 function shortDate(s) { const d = parseDate(s); return `${d.getMonth() + 1}/${d.getDate()}`; }
+
+/* ---------- 차시 관리 ---------- */
+// 같은 날 k번째 차시 → 그 요일 시간표의 k번째 시간
+function slotsOn(course, date) {
+  const dow = parseDate(date).getDay();
+  return (TIMETABLE[course.id] || []).filter(t => t.d === dow).sort((a, b) => toMin(a.s) - toMin(b.s));
+}
+function slotFor(course, session) {
+  const idx = course.sessions.filter(s => s.date === session.date && s.no < session.no).length;
+  return slotsOn(course, session.date)[idx] || null;
+}
+
+/* 차시 목록을 다시 매긴다. list: [{ date, old }] (old = 기존 차시 번호, 새 차시는 null).
+   날짜순으로 정렬하고 차시 번호가 바뀐 만큼 출결·공문 기록도 옮긴다. */
+function rebuildSessions(course, list) {
+  const sorted = list.map((x, i) => ({ ...x, i })).sort((a, b) => a.date.localeCompare(b.date) || a.i - b.i);
+  const map = {};
+  sorted.forEach((x, i) => { if (x.old != null) map[x.old] = i + 1; });
+  for (const store of [data.marks, data.docs]) {
+    const moved = {};
+    for (const k of Object.keys(store)) {
+      const { cid, no, sid } = splitKey(k);
+      if (cid !== course.id) continue;
+      if (map[no]) moved[`${cid}|${map[no]}|${sid}`] = store[k];
+      delete store[k];
+    }
+    Object.assign(store, moved);
+  }
+  course.sessions = sorted.map((x, i) => ({ no: i + 1, date: x.date }));
+  save();
+}
+const currentList = course => course.sessions.map(s => ({ date: s.date, old: s.no }));
+
+function autoDates(course, count) {
+  const out = [];
+  const last = course.sessions.at(-1)?.date;
+  let d = last ? addDays(last, 1) : todayStr();
+  for (let guard = 0; out.length < count && guard < 400; guard++, d = addDays(d, 1)) {
+    if (HOLIDAYS[d]) continue;
+    for (const _ of slotsOn(course, d)) if (out.length < count) out.push(d);
+  }
+  return out;
+}
+
+function renderSessions() {
+  const main = $('main');
+  main.className = '';
+  if (!data.courses.some(c => c.id === sessCourse)) sessCourse = data.courses[0]?.id;
+  const course = data.courses.find(c => c.id === sessCourse);
+  const today = todayStr();
+  const perWeek = (TIMETABLE[course.id] || []).length;
+  const cap = course.capacity || null;
+  const marksOf = no => {
+    const t = tally(course, no);
+    return ['absent', 'pending', 'excused'].filter(k => t[k]).map(k => `<span class="mini ${k}">${SHORT[k]} ${t[k]}</span>`).join('');
+  };
+
+  main.innerHTML = `<div class="docs">
+    <div class="subtabs" style="flex-wrap:wrap">
+      ${data.courses.map(c => `<button data-cid="${esc(c.id)}" class="${c.id === course.id ? 'active' : ''}">${esc(c.title)}</button>`).join('')}
+    </div>
+    <div class="card doc-group">
+      <div class="doc-head">
+        <b>${esc(course.title)}</b>
+        <span class="sub">총 ${course.sessions.length}차시${cap ? ` · 출석부 양식 ${cap}칸` : ''}${perWeek ? ` · 주 ${perWeek}차시` : ' · 시간표 없음'}</span>
+      </div>
+      <div class="sess-tools">
+        <input type="number" id="autoCount" min="1" max="60" value="${perWeek || 1}" ${perWeek ? '' : 'disabled'}>
+        <button class="primary" id="autoAdd" ${perWeek ? '' : 'disabled'}>시간표대로 차시 추가</button>
+        <span class="sep"></span>
+        <input type="date" id="manualDate" value="${today}">
+        <button id="manualAdd">이 날짜로 1차시 추가</button>
+      </div>
+      <p class="hint" style="padding-bottom:4px">공휴일은 자동으로 건너뜁니다. 학교 행사 등으로 수업이 없는 날은 삭제하세요. 날짜를 고치면 차시 순서가 날짜순으로 다시 매겨집니다.</p>
+      ${course.sessions.length ? '' : '<div class="empty">등록된 차시가 없습니다.</div>'}
+      <ul class="sess-list">
+        ${course.sessions.map(s => {
+          const slot = slotFor(course, s);
+          const cls = [s.date < today ? 'past' : '', s.date === today ? 'today' : '', s.no > 1 && (s.no - 1) % PER_PAGE === 0 ? 'page-break' : ''].join(' ');
+          const warn = HOLIDAYS[s.date] ? `<span class="warn">${HOLIDAYS[s.date]}</span>`
+                     : !slot && perWeek ? '<span class="warn">시간표에 없는 요일</span>' : '';
+          const over = cap && s.no > cap ? '<span class="warn">양식 칸 초과</span>' : '';
+          return `<li class="${cls}" data-no="${s.no}">
+            <span class="no">${s.no}차시</span>
+            <input type="date" value="${s.date}" aria-label="${s.no}차시 날짜">
+            <span class="desc">${WEEK[parseDate(s.date).getDay()]}요일${slot ? ` · ${slot.p}교시 ${slot.s}` : ''} ${warn}${over}${marksOf(s.no)}</span>
+            <button class="link-btn" data-act="del">삭제</button>
+          </li>`;
+        }).join('')}
+      </ul>
+    </div>
+  </div>`;
+
+  main.querySelectorAll('.subtabs button').forEach(b => b.onclick = () => { sessCourse = b.dataset.cid; sessScroll = true; render(); });
+  $('autoAdd').onclick = () => {
+    const n = Math.max(1, Math.min(60, Number($('autoCount').value) || 1));
+    const dates = autoDates(course, n);
+    rebuildSessions(course, [...currentList(course), ...dates.map(date => ({ date, old: null }))]);
+    toast(`${dates.length}개 차시를 추가했습니다 (${shortDate(dates[0])}~${shortDate(dates.at(-1))}).`);
+    render();
+    main.querySelector('.sess-list li:last-child')?.scrollIntoView({ block: 'center' });
+  };
+  $('manualAdd').onclick = () => {
+    const date = $('manualDate').value;
+    if (!date) return;
+    rebuildSessions(course, [...currentList(course), { date, old: null }]);
+    const no = course.sessions.filter(s => s.date <= date).at(-1).no;
+    toast(`${fmtDate(date)} ${no}차시를 추가했습니다.`);
+    render();
+    main.querySelector(`.sess-list li[data-no="${no}"]`)?.scrollIntoView({ block: 'center' });
+  };
+  main.querySelectorAll('.sess-list input[type=date]').forEach(inp => inp.onchange = () => {
+    const no = Number(inp.closest('li').dataset.no);
+    if (!inp.value) { render(); return; }
+    rebuildSessions(course, currentList(course).map(x => x.old === no ? { ...x, date: inp.value } : x));
+    toast(`${fmtDate(inp.value)}(으)로 바꿨습니다.`);
+    render();
+  });
+  main.querySelectorAll('.sess-list button[data-act=del]').forEach(b => b.onclick = () => {
+    const no = Number(b.closest('li').dataset.no);
+    const t = tally(course, no);
+    const n = t.absent + t.pending + t.excused;
+    const s = course.sessions[no - 1];
+    if (!confirm(`${no}차시 (${fmtDate(s.date)})를 삭제할까요?` + (n ? `\n이 차시의 출결 기록 ${n}건도 함께 삭제됩니다.` : '') + '\n뒤 차시들의 번호가 하나씩 당겨집니다.')) return;
+    rebuildSessions(course, currentList(course).filter(x => x.old !== no));
+    toast(`${no}차시를 삭제했습니다.`);
+    render();
+  });
+
+  if (sessScroll) {   // 탭·과목을 바꿨을 때만 오늘 이후 첫 차시로 스크롤
+    sessScroll = false;
+    main.querySelector('.sess-list li:not(.past)')?.scrollIntoView({ block: 'center' });
+  }
+}
 
 /* ---------- 인정결석 공문 관리 ----------
    같은 과목·같은 학생의 인정결석을 한 묶음으로 보여 준다(공문 1건이 여러 날을 다루는 경우가 많음). */
@@ -552,13 +721,14 @@ function scanSheet(ws) {
 
   const students = pages[0].rows.map((x, i) => ({ id: 's' + (i + 1), seq: i + 1, school: str(x.r, 2), sid: str(x.r, 3), name: x.name }));
 
+  // 차시 n은 (n-1)/17 번째 페이지의 F열부터 순서대로. 빈칸이나 앞보다 이른 날짜에서 멈춘다.
   const sessions = [];
   let last = '';
   outer:
   for (let p = 0; p < pages.length; p++) {
-    for (let c = 5; c <= 21; c++) {
+    for (let c = FIRST_COL; c < FIRST_COL + PER_PAGE; c++) {
       const v = cell(pages[p].h + 1, c);
-      if (typeof v !== 'number' || v < 40000) continue;
+      if (typeof v !== 'number' || v < 40000) break outer;
       const d = XLSX.SSF.parse_date_code(v);
       const date = `${d.y}-${pad(d.m)}-${pad(d.d)}`;
       if (date < last) break outer;
@@ -594,7 +764,8 @@ function importWorkbook(buf, fileName) {
       }
     }
     courses.push({ id: sheetName, title: sc.info.title, credits: sc.info.credits, teacher: sc.info.teacher,
-                   note: sc.note, students: sc.students, sessions: sc.sessions.map(({ no, date }) => ({ no, date })) });
+                   note: sc.note, students: sc.students, sessions: sc.sessions.map(({ no, date }) => ({ no, date })),
+                   capacity: sc.pages.length * PER_PAGE });
     if (!TIMETABLE[sheetName]) warnings.push(sheetName);
   }
 
@@ -700,7 +871,7 @@ async function exportWorkbook(template) {
     return xfCache[ck];
   }
 
-  let written = 0;
+  const overflow = [];
   for (const course of data.courses) {
     const path = sheetPath[course.id];
     const sc = path && scanSheet(wb.Sheets[course.id]);
@@ -710,25 +881,33 @@ async function exportWorkbook(template) {
     const rowEls = {};
     for (const r of sheetData.getElementsByTagNameNS(NS, 'row')) rowEls[r.getAttribute('r')] = r;
 
-    for (const s of sc.sessions) {
-      for (const row of sc.pages[s.page].rows) {
-        const st = course.students.find(x => x.name === row.name);
-        if (!st) continue;
-        const m = markOf(course.id, s.no, st.id);
-        const cur = sc.str(row.r, s.col);
-        if (m === 'present' && !['', 'X', 'x', '◎'].includes(cur)) continue;  // '확' 같은 메모 기호는 그대로 둔다
-        setCell(doc, sheetData, rowEls, row.r + 1, s.col, EXPORT_SYMBOL[m], m === 'pending', styleFor);
-        written++;
+    // 양식의 모든 차시 칸을 앱의 차시 순서대로 채운다. 차시가 없는 칸은 날짜와 출결 기호를 비운다.
+    for (let p = 0; p < sc.pages.length; p++) {
+      for (let c = FIRST_COL; c < FIRST_COL + PER_PAGE; c++) {
+        const s = course.sessions[p * PER_PAGE + (c - FIRST_COL)];
+        setCell(doc, sheetData, rowEls, sc.pages[p].h + 2, c, s ? dateSerial(s.date) : null, x => x);
+        for (const row of sc.pages[p].rows) {
+          const cur = sc.str(row.r, c);
+          const st = course.students.find(x => x.name === row.name);
+          const m = s && st ? markOf(course.id, s.no, st.id) : 'present';
+          if (m === 'present' && !['', 'X', 'x', '◎'].includes(cur)) continue;  // '확' 같은 메모 기호는 그대로 둔다
+          setCell(doc, sheetData, rowEls, row.r + 1, c, EXPORT_SYMBOL[m], x => styleFor(x, m === 'pending'));
+        }
       }
     }
+    const cap = sc.pages.length * PER_PAGE;
+    if (course.sessions.length > cap) overflow.push(`${course.title} ${course.sessions.length}차시(양식 ${cap}칸)`);
     write(path, doc);
   }
   write('xl/styles.xml', styles);
   const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-  return { blob, written };
+  return { blob, overflow };
 }
 
-function setCell(doc, sheetData, rowEls, r1, c0, text, yellow, styleFor) {
+function dateSerial(s) { const [y, m, d] = s.split('-').map(Number); return (Date.UTC(y, m - 1, d) - Date.UTC(1899, 11, 30)) / 864e5; }
+
+/* value: 문자열(inline string) · 숫자 · null(비움). restyle: 기존 스타일 번호 → 새 스타일 번호 */
+function setCell(doc, sheetData, rowEls, r1, c0, value, restyle) {
   const ref = XLSX.utils.encode_col(c0) + r1;
   let row = rowEls[r1];
   if (!row) {
@@ -747,12 +926,16 @@ function setCell(doc, sheetData, rowEls, r1, c0, text, yellow, styleFor) {
   }
   while (c.firstChild) c.removeChild(c.firstChild);
   c.removeAttribute('t');
-  c.setAttribute('s', styleFor(Number(c.getAttribute('s') || 0), yellow));
-  if (text) {
+  c.setAttribute('s', restyle(Number(c.getAttribute('s') || 0)));
+  if (typeof value === 'number') {
+    const v = doc.createElementNS(NS, 'v');
+    v.textContent = String(value);
+    c.appendChild(v);
+  } else if (value) {
     c.setAttribute('t', 'inlineStr');
     const is = doc.createElementNS(NS, 'is');
     const t = doc.createElementNS(NS, 't');
-    t.textContent = text;
+    t.textContent = value;
     is.appendChild(t);
     c.appendChild(is);
   }
@@ -768,7 +951,8 @@ function downloadBlob(blob, name) {
 async function runExport(template) {
   try {
     toast('엑셀 파일을 만드는 중…');
-    const { blob } = await exportWorkbook(template.buf);
+    const { blob, overflow } = await exportWorkbook(template.buf);
+    if (overflow.length) alert('출석부 양식의 차시 칸이 모자라 일부 차시를 내보내지 못했습니다.\n' + overflow.join('\n') + '\n\n엑셀 양식에 페이지를 추가한 뒤 메뉴의 「내보내기 양식 파일 바꾸기」로 그 파일을 지정해 주세요.');
     const base = (template.fileName || '출석부.xlsx').replace(/\.xlsx?$/i, '');
     downloadBlob(blob, `${base}_${todayStr().replace(/-/g, '')}.xlsx`);
     const n = Object.values(data.marks).filter(v => v === 'pending').length;
@@ -805,19 +989,24 @@ $('menuExport').onclick = () => {
   if (t) runExport(t);
   else { toast('양식으로 쓸 원본 출석부 파일을 선택하세요.'); $('templateInput').click(); }
 };
+let templateThenExport = true;
+$('menuTemplate').onclick = () => { templateThenExport = false; $('templateInput').click(); };
 $('templateInput').addEventListener('change', async e => {
   const file = e.target.files[0];
   e.target.value = '';
   if (!file) return;
   const buf = await file.arrayBuffer();
   saveTemplate(buf, file.name);
-  runExport({ fileName: file.name, buf });
+  if (templateThenExport) runExport({ fileName: file.name, buf });
+  else toast(`내보내기 양식을 「${file.name}」로 바꿨습니다.`);
+  templateThenExport = true;
 });
 document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
   view = b.dataset.view;
   if (view === 'docs') docsTab = 'pending';
-  render();
+  if (view === 'sessions') { sessCourse = sessCourse || classesOn(viewDate)[0]?.course.id; sessScroll = true; }
   window.scrollTo(0, 0);
+  render();
 });
 $('menuReset').onclick = () => {
   if (!confirm('모든 과목과 출결 기록을 지울까요? 되돌릴 수 없습니다.')) return;
