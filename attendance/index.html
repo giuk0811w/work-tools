@@ -40,7 +40,38 @@
   .datenav .date { font-weight: 700; min-width: 132px; text-align: center; font-variant-numeric: tabular-nums; }
   .clock { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
   .menu-btn { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 6px 10px; }
-  .pending-badge { font-size: 12px; background: var(--pending-soft); color: var(--pending); border-radius: 999px; padding: 3px 10px; font-weight: 600; }
+  .datenav[hidden] + .menu-btn { margin-left: auto; }
+  .tabs { display: flex; gap: 4px; background: var(--soft); border-radius: 10px; padding: 3px; }
+  .tabs button { border: 0; background: transparent; border-radius: 8px; padding: 6px 12px; font-size: 14px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+  .tabs button.active { background: var(--card); color: var(--text); font-weight: 700; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .pill { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 7px; background: var(--pending); color: #fff; }
+
+  /* 인정결석 공문 관리 */
+  .docs { max-width: 760px; width: 100%; margin: 0 auto; display: grid; gap: 12px; }
+  .subtabs { display: flex; gap: 6px; }
+  .subtabs button { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 6px 14px; font-size: 14px; }
+  .subtabs button.active { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+  .doc-group { padding: 0; overflow: hidden; }
+  .doc-head { padding: 14px 16px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; border-bottom: 1px solid var(--line); }
+  .doc-head b { font-size: 16px; }
+  .doc-head .sub { color: var(--muted); font-size: 13px; }
+  .doc-head .course { margin-left: auto; font-size: 13px; font-weight: 600; }
+  .doc-rows { list-style: none; margin: 0; padding: 4px 16px; }
+  .doc-rows li { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); flex-wrap: wrap; font-size: 14px; }
+  .doc-rows li:first-child { border-top: 0; }
+  .doc-rows label { display: flex; gap: 10px; align-items: center; flex: 1 1 200px; cursor: pointer; }
+  .doc-rows input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
+  .doc-rows .when { font-variant-numeric: tabular-nums; }
+  .doc-rows .elapsed { font-size: 12px; color: var(--pending); font-weight: 600; }
+  .doc-rows .info { font-size: 12px; color: var(--muted); flex: 1 1 200px; }
+  .link-btn { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 4px 10px; font-size: 13px; color: var(--muted); }
+  .doc-foot { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 12px 16px; background: var(--soft); }
+  .doc-foot label { font-size: 13px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+  .doc-foot input { font: inherit; font-size: 14px; color: var(--text); background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  .doc-foot input.memo { flex: 1 1 180px; }
+  .doc-foot .primary { padding: 8px 14px; margin-left: auto; }
+  .student .who .doc-info { display: block; font-size: 12px; color: var(--excused); }
+  .student .who .doc-info.pending { color: var(--pending); }
 
   main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
   @media (min-width: 860px) { main.has-data { grid-template-columns: 340px 1fr; align-items: start; } }
@@ -133,7 +164,10 @@
   <div class="top">
     <h1>출석 확인</h1>
     <span class="clock" id="clock"></span>
-    <span class="pending-badge" id="pendingBadge" hidden></span>
+    <nav class="tabs" id="tabs" hidden>
+      <button data-view="classes" class="active">수업</button>
+      <button data-view="docs">인정결석 공문 <span class="pill" id="pendingPill" hidden></span></button>
+    </nav>
     <div class="datenav" id="datenav" hidden>
       <button id="prevDay" aria-label="이전 날">‹</button>
       <span class="date" id="dateLabel"></span>
@@ -177,11 +211,15 @@ const STORE_KEY = 'attendance-v2';
 /* data = {
      importedAt, fileName,
      courses: [{ id, title, credits, teacher, note, students: [{ id, seq, school, sid, name }], sessions: [{ no, date }] }],
-     marks: { "courseId|sessionNo|studentId": "absent" | "pending" | "excused" }   // 없으면 출석
+     marks: { "courseId|sessionNo|studentId": "absent" | "pending" | "excused" },  // 없으면 출석
+     docs:  { "courseId|sessionNo|studentId": { received: 'YYYY-MM-DD' | null, memo } }  // 인정결석 확정 시 공문 정보
    } */
 let data = load();
 let viewDate;             // 'YYYY-MM-DD' (유틸 정의 뒤에 초기화)
 let selectedKey = null;   // "courseId|sessionNo"
+let view = 'classes';     // 'classes' | 'docs'
+let docsTab = 'pending';  // 'pending' | 'excused'
+if (data) data.docs = data.docs || {};
 
 function load() {
   try { const raw = localStorage.getItem(STORE_KEY); if (raw) return JSON.parse(raw); } catch (e) {}
@@ -236,6 +274,8 @@ function markOf(courseId, no, studentId) { return data.marks[`${courseId}|${no}|
 function setMark(courseId, no, studentId, status) {
   const key = `${courseId}|${no}|${studentId}`;
   if (status === 'present') delete data.marks[key]; else data.marks[key] = status;
+  if (status === 'excused') data.docs[key] = data.docs[key] || { received: todayStr(), memo: '' };
+  else delete data.docs[key];
   save();
 }
 function tally(course, no) {
@@ -253,7 +293,9 @@ function nearestClassDate(from, dir) {
 /* ---------- 렌더링 ---------- */
 function render() {
   const main = $('main');
-  $('datenav').hidden = !data;
+  $('datenav').hidden = !data || view !== 'classes';
+  $('tabs').hidden = !data;
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.view === view));
   renderPendingBadge();
   if (!data) {
     main.className = '';
@@ -266,6 +308,8 @@ function render() {
     $('welcomeImport').onclick = () => $('fileInput').click();
     return;
   }
+
+  if (view === 'docs') { renderDocs(); return; }
 
   $('dateLabel').textContent = fmtDate(viewDate);
   $('todayBtn').disabled = viewDate === todayStr();
@@ -349,7 +393,7 @@ function renderRoster(item) {
         const m = markOf(course.id, session.no, st.id);
         return `<li class="student ${m !== 'present' ? 'marked' : ''}" data-id="${st.id}">
           <span class="no">${st.seq}</span>
-          <span class="who"><b>${esc(st.name)}</b><span>${esc(st.school)}${st.sid ? ' · ' + esc(st.sid) : ''}</span></span>
+          <span class="who"><b>${esc(st.name)}</b><span>${esc(st.school)}${st.sid ? ' · ' + esc(st.sid) : ''}</span>${docInfoLine(`${course.id}|${session.no}|${st.id}`, m)}</span>
           <span class="seg">${STATUSES.map(s => `<button data-s="${s.key}" class="${m === s.key ? 'on' : ''}">${s.label}</button>`).join('')}</span>
         </li>`;
       }).join('')}
@@ -365,9 +409,108 @@ function renderRoster(item) {
 
 function renderPendingBadge() {
   const n = data ? Object.values(data.marks).filter(v => v === 'pending').length : 0;
-  const b = $('pendingBadge');
-  b.hidden = !n;
-  b.textContent = `공문 대기 ${n}건`;
+  $('pendingPill').hidden = !n;
+  $('pendingPill').textContent = n;
+}
+
+function docInfoLine(k, m) {
+  if (m === 'pending') return '<span class="doc-info pending">공문 접수 대기 중</span>';
+  if (m !== 'excused') return '';
+  const d = data.docs[k];
+  if (!d) return '';
+  return `<span class="doc-info">${d.received ? '공문 ' + shortDate(d.received) + ' 접수' : '공문 접수(날짜 미기록)'}${d.memo ? ' · ' + esc(d.memo) : ''}</span>`;
+}
+function shortDate(s) { const d = parseDate(s); return `${d.getMonth() + 1}/${d.getDate()}`; }
+
+/* ---------- 인정결석 공문 관리 ----------
+   같은 과목·같은 학생의 인정결석을 한 묶음으로 보여 준다(공문 1건이 여러 날을 다루는 경우가 많음). */
+function splitKey(k) { const p = k.split('|'); const sid = p.pop(); const no = Number(p.pop()); return { cid: p.join('|'), no, sid }; }
+
+function docGroups(status) {
+  const groups = new Map();
+  for (const [k, v] of Object.entries(data.marks)) {
+    if (v !== status) continue;
+    const { cid, no, sid } = splitKey(k);
+    const course = data.courses.find(c => c.id === cid);
+    const student = course?.students.find(s => s.id === sid);
+    const session = course?.sessions.find(s => s.no === no);
+    if (!student || !session) continue;
+    const gk = `${cid}|${sid}`;
+    if (!groups.has(gk)) groups.set(gk, { gk, course, student, items: [] });
+    groups.get(gk).items.push({ k, session, doc: data.docs[k] });
+  }
+  const list = [...groups.values()];
+  list.forEach(g => g.items.sort((a, b) => a.session.no - b.session.no));
+  if (status === 'pending') list.sort((a, b) => a.items[0].session.date.localeCompare(b.items[0].session.date));
+  else list.sort((a, b) => b.items.at(-1).session.date.localeCompare(a.items.at(-1).session.date));
+  return list;
+}
+
+function daysBetween(a, b) { return Math.round((parseDate(b) - parseDate(a)) / 864e5); }
+
+function renderDocs() {
+  const main = $('main');
+  main.className = '';
+  const pending = docGroups('pending');
+  const excused = docGroups('excused');
+  const count = gs => gs.reduce((n, g) => n + g.items.length, 0);
+  const groups = docsTab === 'pending' ? pending : excused;
+  const today = todayStr();
+
+  main.innerHTML = `<div class="docs">
+    <div class="subtabs">
+      <button data-tab="pending" class="${docsTab === 'pending' ? 'active' : ''}">공문 대기 ${count(pending)}</button>
+      <button data-tab="excused" class="${docsTab === 'excused' ? 'active' : ''}">확정 ${count(excused)}</button>
+    </div>
+    ${!groups.length ? `<div class="card empty"><b>${docsTab === 'pending' ? '공문을 기다리는 인정결석이 없습니다' : '확정된 인정결석이 없습니다'}</b>
+      ${docsTab === 'pending' ? '수업 화면에서 학생을 <b style="display:inline;font-size:inherit">인정결석(대기)</b>로 표시하면 여기에 모입니다.' : ''}</div>` : ''}
+    ${groups.map(g => `<div class="card doc-group" data-gk="${esc(g.gk)}">
+      <div class="doc-head">
+        <b>${esc(g.student.name)}</b>
+        <span class="sub">${esc(g.student.school)}${g.student.sid ? ' · ' + esc(g.student.sid) : ''}</span>
+        <span class="course">${esc(g.course.title)} · ${g.items.length}차시</span>
+      </div>
+      <ul class="doc-rows">
+        ${g.items.map(it => docsTab === 'pending'
+          ? `<li data-k="${esc(it.k)}">
+              <label><input type="checkbox" checked>
+                <span class="when">${fmtDate(it.session.date)} · ${it.session.no}차시</span>
+                <span class="elapsed">${daysBetween(it.session.date, today) > 0 ? daysBetween(it.session.date, today) + '일 경과' : ''}</span></label>
+              <button class="link-btn" data-act="absent">결석으로 변경</button>
+            </li>`
+          : `<li data-k="${esc(it.k)}">
+              <span class="when">${fmtDate(it.session.date)} · ${it.session.no}차시</span>
+              <span class="info">${it.doc?.received ? '공문 ' + fmtDate(it.doc.received) + ' 접수' : '접수일 미기록'}${it.doc?.memo ? ' · ' + esc(it.doc.memo) : ''}</span>
+              <button class="link-btn" data-act="pending">대기로 되돌리기</button>
+            </li>`).join('')}
+      </ul>
+      ${docsTab === 'pending' ? `<div class="doc-foot">
+        <label>공문 접수일 <input type="date" class="received" value="${today}"></label>
+        <input class="memo" placeholder="메모 (공문 번호, 사유 등)">
+        <button class="primary" data-act="confirm">선택 차시 확정</button>
+      </div>` : ''}
+    </div>`).join('')}
+  </div>`;
+
+  main.querySelectorAll('.subtabs button').forEach(b => b.onclick = () => { docsTab = b.dataset.tab; render(); });
+  main.querySelectorAll('.doc-rows button[data-act]').forEach(b => b.onclick = () => {
+    const k = b.closest('li').dataset.k;
+    const { cid, no, sid } = splitKey(k);
+    setMark(cid, no, sid, b.dataset.act);
+    toast(b.dataset.act === 'absent' ? '결석으로 변경했습니다.' : '공문 대기로 되돌렸습니다.');
+    render();
+  });
+  main.querySelectorAll('button[data-act="confirm"]').forEach(b => b.onclick = () => {
+    const box = b.closest('.doc-group');
+    const keys = [...box.querySelectorAll('.doc-rows li')].filter(li => li.querySelector('input[type=checkbox]').checked).map(li => li.dataset.k);
+    if (!keys.length) { toast('확정할 차시를 선택하세요.'); return; }
+    const received = box.querySelector('.received').value || todayStr();
+    const memo = box.querySelector('.memo').value.trim();
+    keys.forEach(k => { data.marks[k] = 'excused'; data.docs[k] = { received, memo }; });
+    save();
+    toast(`${keys.length}개 차시를 인정결석으로 확정했습니다.`);
+    render();
+  });
 }
 
 function tick() {
@@ -447,7 +590,9 @@ function importWorkbook(buf, fileName) {
   });
 
   if (!courses.length) throw new Error('출석부 형식의 시트를 찾지 못했습니다.');
-  data = { importedAt: new Date().toISOString(), fileName, courses, marks };
+  const docs = {};
+  Object.entries(marks).forEach(([k, v]) => { if (v === 'excused') docs[k] = { received: null, memo: '출석부 엑셀에서 가져옴' }; });
+  data = { importedAt: new Date().toISOString(), fileName, courses, marks, docs };
   save();
   return { courses, warnings };
 }
@@ -462,7 +607,7 @@ $('fileInput').addEventListener('change', async e => {
     const { courses, warnings } = importWorkbook(await file.arrayBuffer(), file.name);
     const students = courses.reduce((n, c) => n + c.students.length, 0);
     toast(`${courses.length}개 과목, 수강생 ${students}명을 불러왔습니다.` + (warnings.length ? ` (시간표 없음: ${warnings.join(', ')})` : ''));
-    viewDate = todayStr(); selectedKey = null;
+    viewDate = todayStr(); selectedKey = null; view = 'classes';
     render();
   } catch (err) {
     toast(err.message || '파일을 읽지 못했습니다.');
@@ -472,6 +617,12 @@ $('fileInput').addEventListener('change', async e => {
 $('menuBtn').onclick = e => { e.stopPropagation(); $('menu').classList.toggle('open'); };
 document.addEventListener('click', () => $('menu').classList.remove('open'));
 $('menuImport').onclick = () => $('fileInput').click();
+document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
+  view = b.dataset.view;
+  if (view === 'docs') docsTab = 'pending';
+  render();
+  window.scrollTo(0, 0);
+});
 $('menuReset').onclick = () => {
   if (!confirm('모든 과목과 출결 기록을 지울까요? 되돌릴 수 없습니다.')) return;
   data = null;
@@ -487,7 +638,7 @@ tick();
 render();
 setInterval(() => {
   tick();
-  if (data && viewDate === todayStr() && !document.querySelector('.menu.open')) render(); // 진행 중 표시 갱신
+  if (data && view === 'classes' && viewDate === todayStr() && !document.querySelector('.menu.open')) render(); // 진행 중 표시 갱신
 }, 60000);
 </script>
 </body>
